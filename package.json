@@ -1,0 +1,16 @@
+{
+  "name": "easyprint",
+  "version": "0.1.0",
+  "description": "A simple 3D printing app for our Ender-3 V3 SE",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

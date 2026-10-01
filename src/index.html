@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>EasyPrint</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-TzwCV9RwRLSFYKbujM56lQiJX5fNozHrr3XXJw0mL1U='">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../node_modules/three/build/three.module.js",
+      "three/addons/": "../node_modules/three/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">◆</span> EasyPrint</div>
+    <div class="printer">Ender-3 V3 SE · 220 × 220 × 250 mm</div>
+  </header>
+
+  <main class="layout">
+    <section class="viewer" id="viewer">
+      <canvas id="scene"></canvas>
+      <div class="viewer-hint" id="viewerHint">Drag to turn · Scroll to zoom · Right-drag to move</div>
+      <div class="drop-overlay" id="dropOverlay">Drop it here</div>
+    </section>
+
+    <aside class="panel">
+      <div class="step active" id="step1">
+        <div class="step-head"><span class="num">1</span> Choose what to print</div>
+
+        <button class="dropzone" id="openBtn">
+          <span class="dz-big">Open a model</span>
+          <span class="dz-small">or drag an STL, 3MF or OBJ file anywhere</span>
+        </button>
+        <input type="file" id="fileInput" accept=".stl,.3mf,.obj" hidden>
+
+        <div class="model-info" id="modelInfo" hidden>
+          <div class="model-name" id="modelName"></div>
+          <div class="model-size" id="modelSize"></div>
+          <div class="fit" id="fitBadge"></div>
+
+          <div class="control-row">
+            <span class="label">Size</span>
+            <div class="stepper">
+              <button id="smallerBtn" title="Smaller">−</button>
+              <span id="scaleLabel">100%</span>
+              <button id="biggerBtn" title="Bigger">+</button>
+            </div>
+          </div>
+          <div class="control-row">
+            <span class="label">Turn</span>
+            <div class="btn-group">
+              <button id="rotZBtn" title="Spin it on the bed">Spin ↻</button>
+              <button id="rotXBtn" title="Tip it forward">Tip forward</button>
+              <button id="rotYBtn" title="Tip it sideways">Tip sideways</button>
+            </div>
+          </div>
+          <button class="link-btn" id="resetBtn">Undo size and turn changes</button>
+        </div>
+      </div>
+
+      <div class="step locked">
+        <div class="step-head"><span class="num">2</span> What is it?</div>
+        <div class="preset-grid">
+          <button disabled>Decoration</button>
+          <button disabled>Sturdy part</button>
+          <button disabled>Quick test</button>
+        </div>
+        <div class="soon">Coming in the next update</div>
+      </div>
+
+      <div class="step locked">
+        <div class="step-head"><span class="num">3</span> Print it</div>
+        <button class="print-btn" disabled>Print</button>
+        <div class="soon">Coming soon</div>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
