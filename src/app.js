@@ -4,7 +4,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
-// Ender-3 V3 SE build volume, in millimetres
+// Ender-3 V3 SE build volume, in millimeters
 const BED = { x: 220, y: 220, z: 250 };
 
 const $ = (id) => document.getElementById(id);
@@ -85,7 +85,8 @@ const modelMat = new THREE.MeshStandardMaterial({ color: 0x2aa595, roughness: 0.
 const tooBigMat = new THREE.MeshStandardMaterial({ color: 0xd2563f, roughness: 0.55 });
 
 let model = null;       // THREE.Group on the bed
-let baseScale = 1;      // file units -> mm (always 1 for now)
+let baseScale = 1;      // file units -> mm
+let rawMax = 0;         // largest side of the model as stored in the file
 let scalePct = 100;
 let currentFile = null; // { name, path }
 
@@ -134,6 +135,12 @@ async function loadFile(file) {
   const centre = box.getCenter(new THREE.Vector3());
   obj.position.sub(centre);
 
+  // Some programs save in meters, centimeters or inches instead of mm.
+  // Guess from the size, like OrcaSlicer does, and let her change it.
+  const raw = box.getSize(new THREE.Vector3());
+  rawMax = Math.max(raw.x, raw.y, raw.z);
+  setUnits(guessUnits(rawMax), true);
+
   scalePct = 100;
   currentFile = { name: file.name, path: window.easyprint?.pathForFile?.(file) || null };
   placeOnBed();
@@ -171,6 +178,22 @@ function placeOnBed() {
   controls.target.set(BED.x / 2, BED.y / 2, Math.min(size.z / 2, 80));
 }
 
+const UNITS = { mm: 1, cm: 10, in: 25.4, m: 1000 };
+const UNIT_NAMES = { mm: 'millimeters', cm: 'centimeters', in: 'inches', m: 'meters' };
+
+function guessUnits(maxSide) {
+  if (maxSide > 0 && maxSide < 1) return 'm';   // under 1 mm is almost always meters
+  return 'mm';
+}
+
+function setUnits(u, guessed = false) {
+  baseScale = UNITS[u];
+  $('unitSelect').value = u;
+  const note = $('unitNote');
+  note.hidden = !(guessed && u !== 'mm');
+  note.textContent = `This file was saved in ${UNIT_NAMES[u]}, so it was converted to mm.`;
+}
+
 const fmt = (n) => (n >= 100 ? n.toFixed(0) : n.toFixed(1));
 
 function rotate(axis) {
@@ -195,6 +218,11 @@ $('smallerBtn').onclick = () => setScale(scalePct - 10);
 $('rotZBtn').onclick = () => rotate(new THREE.Vector3(0, 0, 1));
 $('rotXBtn').onclick = () => rotate(new THREE.Vector3(1, 0, 0));
 $('rotYBtn').onclick = () => rotate(new THREE.Vector3(0, 1, 0));
+$('unitSelect').onchange = (e) => {
+  if (!model) return;
+  setUnits(e.target.value);
+  placeOnBed();
+};
 $('resetBtn').onclick = () => {
   if (!model) return;
   model.children[0].quaternion.identity();
