@@ -245,3 +245,6 @@ button:disabled { cursor: default; }
 .modal-actions { display: flex; justify-content: flex-end; margin-top: 20px; }
 .error-toast.good { background: var(--accent); }
 .print-btn:disabled { background: #b9d6d1; }
+[hidden] { display: none !important; }
+.unit-note { font-size: 12.5px; color: #7a4f00; background: #fbf0d9; padding: 7px 10px; border-radius: 8px; }
+.unit-select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line); background: #fff; }
