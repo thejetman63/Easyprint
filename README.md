@@ -13,10 +13,18 @@ OrcaSlicer does the slicing in the background.
 
 To get updates: open GitHub Desktop, click **Fetch origin**, then **Pull**, and start the app again.
 
+## How slicing works
+
+EasyPrint finds OrcaSlicer and uses the printer and filament profiles already set up in it
+(the ones last selected in Orca are preferred). It starts from Orca's own tested print profile
+for the printer and changes only a few settings for each choice. The recipes live in
+`lib/recipes.js`. If something goes wrong, the error box has **Show details** and
+**Open job folder**, which holds `orca-log.txt` to send to Claude.
+
 ## Progress
 
 - [x] Step 1 – Open a model and see it on the bed (size, fit check, resize, turn)
-- [ ] Step 2 – Preset buttons, sliced by OrcaSlicer in the background
+- [x] Step 2 – Preset buttons, sliced by OrcaSlicer in the background, save G-code
 - [ ] Step 3 – Layer preview
 - [ ] Step 4 – One-button USB printing with temperatures and progress
 - [ ] Step 5 – "Ask" box powered by a local Ollama model
