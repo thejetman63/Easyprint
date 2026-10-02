@@ -10,10 +10,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist node_modules (
-  echo First run: setting things up. This takes a minute...
-  call npm install
-  if errorlevel 1 ( echo Setup failed. Send Claude a screenshot of this window. & pause & exit /b 1 )
-)
+rem Installs anything new after an update. Quick when nothing changed.
+echo Checking for updates to EasyPrint's add-ons...
+call npm install --no-audit --no-fund --loglevel=error
+if errorlevel 1 ( echo Setup failed. Send Claude a screenshot of this window. & pause & exit /b 1 )
 
 call npm start
