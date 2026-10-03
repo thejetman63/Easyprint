@@ -26,5 +26,5 @@ for the printer and changes only a few settings for each choice. The recipes liv
 - [x] Step 1 – Open a model and see it on the bed (size, fit check, resize, turn)
 - [x] Step 2 – Preset buttons, sliced by OrcaSlicer in the background, save G-code
 - [ ] Step 3 – Layer preview
-- [ ] Step 4 – One-button USB printing with temperatures and progress
+- [x] Step 4 – One-button USB printing with temperatures, progress, pause and stop (replaces Pronterface)
 - [ ] Step 5 – "Ask" box powered by a local Ollama model

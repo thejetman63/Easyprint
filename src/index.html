@@ -18,7 +18,11 @@
   <header class="topbar">
     <div class="brand"><span class="logo">◆</span> EasyPrint</div>
     <div class="topbar-right">
-      <div class="printer">Ender-3 V3 SE · 220 × 220 × 250 mm</div>
+      <div class="printer-pill" id="printerPill">
+        <span class="dot" id="printerDot"></span>
+        <span id="printerText">Printer not connected</span>
+        <button class="pill-btn" id="connectBtn">Connect</button>
+      </div>
       <button class="setup-btn" id="setupBtn" title="Printer setup">⚙ Printer setup</button>
     </div>
   </header>
@@ -39,6 +43,7 @@
           <span class="dz-small">or drag an STL, 3MF or OBJ file anywhere</span>
         </button>
         <input type="file" id="fileInput" accept=".stl,.3mf,.obj" hidden>
+        <button class="link-btn gcode-link" id="printFileBtn">Or print a G-code file you already have</button>
 
         <div class="model-info" id="modelInfo" hidden>
           <div class="model-name" id="modelName"></div>
@@ -100,7 +105,6 @@
           <div class="result-big" id="resultTime"></div>
           <div class="result-small" id="resultDetail"></div>
           <div class="stale" id="resultStale" hidden>You changed something. Press <b>Get it ready</b> again.</div>
-          <button class="secondary-btn" id="saveBtn">Save G-code (SD card or Pronterface)</button>
         </div>
         <div class="banner error" id="sliceError" hidden>
           <div id="sliceErrorText"></div>
@@ -110,11 +114,48 @@
           </div>
           <pre class="log" id="sliceLog" hidden></pre>
         </div>
-        <button class="print-btn" disabled>Print</button>
-        <div class="soon">One-button USB printing is coming in a later update</div>
+        <div class="banner error" id="printError" hidden></div>
+        <button class="print-btn" id="printBtn" disabled>Print</button>
+        <div class="print-hint" id="printHint">Get it ready first</div>
+        <button class="link-btn save-link" id="saveBtn" hidden>Save to SD card instead</button>
       </div>
     </aside>
   </main>
+
+  <div class="print-sheet" id="printSheet" hidden>
+    <div class="ps-head">
+      <div>
+        <div class="ps-title" id="psTitle">Printing</div>
+        <div class="ps-file" id="psFile"></div>
+      </div>
+      <div class="ps-pct" id="psPct">0%</div>
+    </div>
+    <div class="bar"><div class="bar-fill" id="psBar"></div></div>
+    <div class="ps-stats">
+      <div><span class="k">Time left</span><span class="v" id="psLeft">–</span></div>
+      <div><span class="k">Printing for</span><span class="v" id="psElapsed">–</span></div>
+      <div><span class="k">Nozzle</span><span class="v" id="psNozzle">–</span></div>
+      <div><span class="k">Bed</span><span class="v" id="psBed">–</span></div>
+    </div>
+    <div class="ps-note" id="psNote"></div>
+    <div class="ps-actions">
+      <button class="secondary-btn" id="pauseBtn">Pause</button>
+      <button class="danger-btn" id="stopBtn">Stop</button>
+      <button class="primary-btn small" id="closeSheetBtn" hidden>Done</button>
+    </div>
+    <div class="ps-foot">Keep this computer on and the USB cable plugged in until it finishes.</div>
+  </div>
+
+  <dialog class="modal" id="confirmStop">
+    <form method="dialog">
+      <h2>Stop this print?</h2>
+      <p class="muted">The print can’t be continued after stopping. The heaters will turn off and the nozzle will move up out of the way.</p>
+      <div class="modal-actions">
+        <button value="no" class="secondary-btn inline">Keep printing</button>
+        <button value="yes" class="danger-btn">Stop print</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog class="modal" id="setupDialog">
     <form method="dialog">

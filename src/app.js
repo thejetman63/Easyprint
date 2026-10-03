@@ -328,6 +328,7 @@ function onChoicesChanged() {
     : 'Get it ready';
 
   $('resultStale').hidden = !lastResult || jobKey() === lastJobKey;
+  updatePrintButton();
 }
 
 function showOrcaWarning() {
@@ -448,6 +449,133 @@ $('petgSelect').onchange = async (e) => { await refreshOrca(await api.setSetting
 if (api?.choices) {
   setupChoices();
   refreshOrca();
+}
+
+// ---------- Step 3: printing over USB ----------
+const pr = api?.printer;
+let printerStatus = { connected: false, temps: {}, job: null };
+let printingName = '';
+let connecting = false;
+
+const deg = (v) => (v == null ? '–' : `${Math.round(v)}°`);
+const tempText = (cur, target) => (target > 0 ? `${deg(cur)} / ${deg(target)}` : deg(cur));
+
+function isPrinting() { return !!(printerStatus.job && !printerStatus.job.finished); }
+
+function updatePill() {
+  const s = printerStatus;
+  const dot = $('printerDot');
+  dot.className = 'dot' + (s.connected ? (isPrinting() ? ' busy' : ' on') : '');
+  if (connecting) $('printerText').textContent = 'Connecting\u2026';
+  else if (!s.connected) $('printerText').textContent = 'Printer not connected';
+  else $('printerText').textContent = `Printer connected \u00b7 Nozzle ${deg(s.temps.nozzle)} \u00b7 Bed ${deg(s.temps.bed)}`;
+  $('connectBtn').textContent = s.connected ? 'Disconnect' : 'Connect';
+  $('connectBtn').hidden = connecting || isPrinting();
+}
+
+function updatePrintButton() {
+  if (!pr) return;
+  const fresh = lastResult && jobKey() === lastJobKey;
+  const btn = $('printBtn');
+  $('saveBtn').hidden = !lastResult;
+  if (isPrinting()) { btn.disabled = true; btn.textContent = 'Printing\u2026'; $('printHint').textContent = 'A print is running'; return; }
+  btn.disabled = !fresh || connecting;
+  btn.textContent = 'Print';
+  $('printHint').textContent = !lastResult ? 'Get it ready first'
+    : !fresh ? 'Press Get it ready again first'
+    : printerStatus.connected ? 'Starts printing straight away'
+    : 'Connects to the printer and starts';
+}
+
+async function connectPrinter() {
+  connecting = true; updatePill(); updatePrintButton();
+  const r = await pr.connect();
+  connecting = false;
+  if (r.ok) printerStatus = r.status;
+  else toast(r.error);
+  updatePill(); updatePrintButton();
+  return r.ok;
+}
+
+$('connectBtn').onclick = async () => {
+  if (printerStatus.connected) {
+    const r = await pr.disconnect();
+    if (!r.ok) toast(r.error);
+    printerStatus = await pr.status();
+    updatePill(); updatePrintButton();
+  } else {
+    await connectPrinter();
+  }
+};
+
+async function startPrint(gcodePath, name, estimateSeconds) {
+  $('printError').hidden = true;
+  if (!printerStatus.connected && !(await connectPrinter())) return;
+  const r = await pr.print(gcodePath, estimateSeconds);
+  if (!r.ok) { $('printError').hidden = false; $('printError').textContent = r.error; return; }
+  printingName = name;
+  $('psFile').textContent = name;
+  $('printSheet').hidden = false;
+}
+
+$('printBtn').onclick = () => {
+  if (!lastResult) return;
+  startPrint(lastResult.gcodePath, currentFile?.name || 'Your print', lastResult.seconds);
+};
+
+$('printFileBtn').onclick = async () => {
+  const file = await pr.openGcode();
+  if (file) startPrint(file, file.split(/[\\/]/).pop(), null);
+};
+
+function fmtDuration(sec) {
+  if (sec == null || !isFinite(sec)) return '–';
+  return formatTime(Math.max(60, sec));
+}
+
+function updateSheet() {
+  const j = printerStatus.job;
+  const sheet = $('printSheet');
+  if (!j) return;
+  const pct = Math.floor(j.progress * 100);
+  $('psPct').textContent = `${j.finished && !j.stopped && !j.failed ? 100 : pct}%`;
+  $('psBar').style.width = `${j.finished && !j.stopped && !j.failed ? 100 : j.progress * 100}%`;
+  $('psLeft').textContent = j.finished ? '–' : fmtDuration(j.left);
+  $('psElapsed').textContent = fmtDuration(j.elapsed);
+  $('psNozzle').textContent = tempText(printerStatus.temps.nozzle, printerStatus.temps.nozzleTarget);
+  $('psBed').textContent = tempText(printerStatus.temps.bed, printerStatus.temps.bedTarget);
+  sheet.classList.toggle('paused', !!j.paused);
+
+  const heating = !j.finished && j.progress < 0.02 && printerStatus.temps.nozzleTarget > 0 &&
+    printerStatus.temps.nozzle < printerStatus.temps.nozzleTarget - 3;
+  $('psTitle').textContent = j.failed ? 'The print stopped' : j.stopped ? 'Print stopped'
+    : j.finished ? 'Finished! \ud83c\udf89' : j.paused ? 'Paused' : heating ? 'Heating up' : 'Printing';
+  $('psNote').textContent = j.paused ? 'The nozzle lifted out of the way. Press Resume to carry on.'
+    : j.finished && !j.stopped && !j.failed ? 'Let the bed cool for a few minutes before taking it off.' : '';
+
+  $('pauseBtn').hidden = j.finished;
+  $('stopBtn').hidden = j.finished;
+  $('closeSheetBtn').hidden = !j.finished;
+  $('pauseBtn').textContent = j.paused ? 'Resume' : 'Pause';
+}
+
+$('pauseBtn').onclick = () => (printerStatus.job?.paused ? pr.resume() : pr.pause());
+$('stopBtn').onclick = () => $('confirmStop').showModal();
+$('confirmStop').addEventListener('close', () => { if ($('confirmStop').returnValue === 'yes') pr.stop(); });
+$('closeSheetBtn').onclick = () => { $('printSheet').hidden = true; };
+
+if (pr) {
+  pr.onStatus((s) => {
+    printerStatus = s;
+    updatePill(); updatePrintButton(); updateSheet();
+  });
+  pr.onProblem((m) => {
+    $('printError').hidden = false;
+    $('printError').textContent = m;
+    toast(m);
+  });
+  pr.status().then((s) => { printerStatus = s; updatePill(); updatePrintButton(); });
+  setInterval(() => { if (isPrinting()) pr.status().then((s) => { printerStatus = s; updateSheet(); }); }, 5000);
 }
 
 // handy for testing
