@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 
 // Ender-3 V3 SE build volume, in millimeters
 const BED = { x: 220, y: 220, z: 250 };
@@ -89,6 +90,7 @@ let baseScale = 1;      // file units -> mm
 let rawMax = 0;         // largest side of the model as stored in the file
 let scalePct = 100;
 let currentFile = null; // { name, path }
+let modelFits = false;
 
 async function loadFile(file) {
   const ext = file.name.split('.').pop().toLowerCase();
@@ -176,6 +178,9 @@ function placeOnBed() {
 
   // keep the camera looking at the model
   controls.target.set(BED.x / 2, BED.y / 2, Math.min(size.z / 2, 80));
+
+  modelFits = fits;
+  onChoicesChanged();
 }
 
 const UNITS = { mm: 1, cm: 10, in: 25.4, m: 1000 };
@@ -243,13 +248,207 @@ window.addEventListener('drop', (e) => {
   if (f) loadFile(f);
 });
 
-function toast(msg) {
+function toast(msg, good = false) {
   const t = document.createElement('div');
-  t.className = 'error-toast';
+  t.className = 'error-toast' + (good ? ' good' : '');
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 4000);
 }
 
+// ---------- Step 2: what is it? ----------
+const api = window.easyprint;
+const job = { recipe: 'decoration', material: 'PLA', toggles: new Set() };
+let lastResult = null;   // { gcodePath, seconds, grams, ... }
+let lastJobKey = null;   // what the last result was made from
+let slicing = false;
+let orcaStatus = null;
+
+async function setupChoices() {
+  const c = await api.choices();
+
+  const recipeList = $('recipeList');
+  for (const [id, r] of Object.entries(c.recipes)) {
+    const b = document.createElement('button');
+    b.className = 'recipe';
+    b.dataset.id = id;
+    b.innerHTML = `<span class="recipe-name"></span><span class="recipe-blurb"></span>`;
+    b.querySelector('.recipe-name').textContent = r.label;
+    b.querySelector('.recipe-blurb').textContent = r.blurb;
+    b.onclick = () => { job.recipe = id; onChoicesChanged(); };
+    recipeList.appendChild(b);
+  }
+
+  const matList = $('materialList');
+  for (const [id, m] of Object.entries(c.materials)) {
+    const b = document.createElement('button');
+    b.dataset.id = id;
+    b.innerHTML = `<span class="seg-name"></span><span class="seg-blurb"></span>`;
+    b.querySelector('.seg-name').textContent = m.label;
+    b.querySelector('.seg-blurb').textContent = m.blurb;
+    b.onclick = () => { job.material = id; onChoicesChanged(); };
+    matList.appendChild(b);
+  }
+
+  const toggleList = $('toggleList');
+  for (const [id, t] of Object.entries(c.toggles)) {
+    const l = document.createElement('label');
+    l.className = 'toggle';
+    l.innerHTML = `<input type="checkbox"><span class="toggle-text"><span class="toggle-name"></span><span class="toggle-hint"></span></span>`;
+    l.querySelector('.toggle-name').textContent = t.label;
+    l.querySelector('.toggle-hint').textContent = t.hint;
+    const cb = l.querySelector('input');
+    cb.dataset.id = id;
+    cb.onchange = () => { cb.checked ? job.toggles.add(id) : job.toggles.delete(id); onChoicesChanged(); };
+    toggleList.appendChild(l);
+  }
+
+  onChoicesChanged();
+}
+
+function jobKey() {
+  if (!model) return null;
+  const m = model.children[0].quaternion;
+  return JSON.stringify([currentFile?.name, scalePct, m.toArray().map((v) => v.toFixed(4)),
+    job.recipe, job.material, [...job.toggles].sort()]);
+}
+
+function onChoicesChanged() {
+  document.querySelectorAll('.recipe').forEach((b) => b.classList.toggle('selected', b.dataset.id === job.recipe));
+  document.querySelectorAll('#materialList button').forEach((b) => b.classList.toggle('selected', b.dataset.id === job.material));
+
+  const ready = !!model;
+  $('step2').classList.toggle('locked', !ready);
+  $('step2').classList.toggle('active', ready);
+
+  const orcaOk = orcaStatus?.orcaFound && orcaStatus?.machine;
+  $('sliceBtn').disabled = !ready || !modelFits || slicing || !orcaOk;
+  $('sliceBtn').textContent = !ready ? 'Open a model first'
+    : !modelFits ? 'Too big. Make it smaller first'
+    : 'Get it ready';
+
+  $('resultStale').hidden = !lastResult || jobKey() === lastJobKey;
+}
+
+function showOrcaWarning() {
+  const w = $('orcaWarn');
+  if (!orcaStatus || orcaStatus.error) { w.hidden = false; w.textContent = 'Couldn\u2019t read OrcaSlicer\u2019s setup. ' + (orcaStatus?.error || ''); return; }
+  if (!orcaStatus.orcaFound) { w.hidden = false; w.textContent = 'OrcaSlicer wasn\u2019t found on this computer. Open Printer setup (top right) and press Find\u2026'; return; }
+  if (!orcaStatus.machine) { w.hidden = false; w.textContent = 'No Ender-3 V3 SE printer profile was found in OrcaSlicer.'; return; }
+  w.hidden = true;
+}
+
+async function refreshOrca(status) {
+  orcaStatus = status || await api.orcaStatus();
+  showOrcaWarning();
+  onChoicesChanged();
+}
+
+// the model exactly as shown (size and turns included), as an STL file
+function exportModelStl() {
+  model.updateMatrixWorld(true);
+  return new STLExporter().parse(model, { binary: true }).buffer;
+}
+
+async function slice() {
+  if (!model || slicing) return;
+  slicing = true;
+  const key = jobKey();
+  $('sliceError').hidden = true;
+  $('sliceStatus').hidden = false;
+  $('sliceStatusText').textContent = 'Getting it ready\u2026 this can take a minute';
+  onChoicesChanged();
+
+  const res = await api.slice({
+    stl: exportModelStl(),
+    modelName: currentFile?.name,
+    recipe: job.recipe,
+    toggles: [...job.toggles],
+    material: job.material,
+  });
+
+  slicing = false;
+  $('sliceStatus').hidden = true;
+  $('step3').classList.remove('locked');
+  $('step3').classList.add('active');
+
+  if (res.ok) {
+    lastResult = res;
+    lastJobKey = key;
+    $('result').hidden = false;
+    $('resultTime').textContent = res.seconds ? `Ready \u2013 about ${formatTime(res.seconds)}` : 'Ready';
+    const bits = [];
+    if (res.grams) bits.push(`${Math.round(res.grams)} g of ${job.material}`);
+    if (res.layerHeight) bits.push(`${res.layerHeight} mm layers`);
+    $('resultDetail').textContent = bits.join(' \u00b7 ');
+    $('step3').scrollIntoView({ behavior: 'smooth', block: 'end' });
+  } else {
+    lastResult = null;
+    $('result').hidden = true;
+    $('sliceError').hidden = false;
+    $('sliceErrorText').textContent = res.error;
+    $('sliceLog').textContent = res.log || '(Orca didn\u2019t say anything)';
+    $('sliceLog').hidden = true;
+    $('openJobBtn').hidden = !res.workDir;
+    $('openJobBtn').onclick = () => api.openFolder(res.workDir);
+    $('step3').scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+  onChoicesChanged();
+}
+
+function formatTime(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.round((sec % 3600) / 60);
+  if (h === 0) return `${Math.max(m, 1)} min`;
+  return m ? `${h} hr ${m} min` : `${h} hr`;
+}
+
+$('sliceBtn').onclick = slice;
+$('showLogBtn').onclick = () => { $('sliceLog').hidden = !$('sliceLog').hidden; };
+$('saveBtn').onclick = async () => {
+  if (!lastResult) return;
+  const r = await api.saveGcode(lastResult.gcodePath);
+  if (r.ok) toast(`Saved to ${r.filePath}`, true);
+};
+
+// ---------- Printer setup ----------
+function fillSelect(sel, options, current) {
+  sel.innerHTML = '';
+  for (const name of options) {
+    const o = document.createElement('option');
+    o.value = o.textContent = name;
+    if (name === current) o.selected = true;
+    sel.appendChild(o);
+  }
+  if (!options.length) {
+    const o = document.createElement('option');
+    o.textContent = 'None found';
+    sel.appendChild(o);
+    sel.disabled = true;
+  } else sel.disabled = false;
+}
+
+function fillSetup() {
+  const s = orcaStatus || {};
+  $('orcaPathText').textContent = s.orcaPath || 'Not found';
+  fillSelect($('machineSelect'), s.machines || [], s.machine);
+  fillSelect($('plaSelect'), s.filaments?.PLA || [], s.filament?.PLA);
+  fillSelect($('petgSelect'), s.filaments?.PETG || [], s.filament?.PETG);
+}
+
+$('setupBtn').onclick = () => { fillSetup(); $('setupDialog').showModal(); };
+$('browseOrcaBtn').onclick = async () => {
+  const p = await api.browseOrca();
+  if (p) { await refreshOrca(await api.setSettings({ orcaPath: p })); fillSetup(); }
+};
+$('machineSelect').onchange = async (e) => { await refreshOrca(await api.setSettings({ machine: e.target.value })); fillSetup(); };
+$('plaSelect').onchange = async (e) => { await refreshOrca(await api.setSettings({ filaments: { PLA: e.target.value } })); };
+$('petgSelect').onchange = async (e) => { await refreshOrca(await api.setSettings({ filaments: { PETG: e.target.value } })); };
+
+if (api?.choices) {
+  setupChoices();
+  refreshOrca();
+}
+
 // handy for testing
-window.__easyprint = { loadFile, get file() { return currentFile; } };
+window.__easyprint = { loadFile, get file() { return currentFile; }, exportModelStl };

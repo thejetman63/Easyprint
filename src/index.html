@@ -17,7 +17,10 @@
 <body>
   <header class="topbar">
     <div class="brand"><span class="logo">◆</span> EasyPrint</div>
-    <div class="printer">Ender-3 V3 SE · 220 × 220 × 250 mm</div>
+    <div class="topbar-right">
+      <div class="printer">Ender-3 V3 SE · 220 × 220 × 250 mm</div>
+      <button class="setup-btn" id="setupBtn" title="Printer setup">⚙ Printer setup</button>
+    </div>
   </header>
 
   <main class="layout">
@@ -73,23 +76,71 @@
         </div>
       </div>
 
-      <div class="step locked">
+      <div class="step locked" id="step2">
         <div class="step-head"><span class="num">2</span> What is it?</div>
-        <div class="preset-grid">
-          <button disabled>Decoration</button>
-          <button disabled>Sturdy part</button>
-          <button disabled>Quick test</button>
+        <div class="banner warn" id="orcaWarn" hidden></div>
+        <div class="recipe-list" id="recipeList"></div>
+
+        <div class="sub-label">Filament</div>
+        <div class="segmented" id="materialList"></div>
+
+        <div class="sub-label">Extras</div>
+        <div class="toggle-list" id="toggleList"></div>
+
+        <button class="primary-btn" id="sliceBtn" disabled>Get it ready</button>
+        <div class="slice-status" id="sliceStatus" hidden>
+          <span class="spinner"></span>
+          <span id="sliceStatusText">Getting it ready…</span>
         </div>
-        <div class="soon">Coming in the next update</div>
       </div>
 
-      <div class="step locked">
+      <div class="step locked" id="step3">
         <div class="step-head"><span class="num">3</span> Print it</div>
+        <div class="result" id="result" hidden>
+          <div class="result-big" id="resultTime"></div>
+          <div class="result-small" id="resultDetail"></div>
+          <div class="stale" id="resultStale" hidden>You changed something. Press <b>Get it ready</b> again.</div>
+          <button class="secondary-btn" id="saveBtn">Save G-code (SD card or Pronterface)</button>
+        </div>
+        <div class="banner error" id="sliceError" hidden>
+          <div id="sliceErrorText"></div>
+          <div class="error-actions">
+            <button class="link-btn" id="showLogBtn">Show details</button>
+            <button class="link-btn" id="openJobBtn">Open job folder</button>
+          </div>
+          <pre class="log" id="sliceLog" hidden></pre>
+        </div>
         <button class="print-btn" disabled>Print</button>
-        <div class="soon">Coming soon</div>
+        <div class="soon">One-button USB printing is coming in a later update</div>
       </div>
     </aside>
   </main>
+
+  <dialog class="modal" id="setupDialog">
+    <form method="dialog">
+      <h2>Printer setup</h2>
+      <p class="muted">EasyPrint uses the profiles you already set up in OrcaSlicer. You normally don’t need to change anything here.</p>
+
+      <label>OrcaSlicer</label>
+      <div class="setup-row">
+        <span id="orcaPathText" class="path"></span>
+        <button type="button" id="browseOrcaBtn">Find…</button>
+      </div>
+
+      <label for="machineSelect">Printer profile</label>
+      <select id="machineSelect"></select>
+
+      <label for="plaSelect">PLA filament profile</label>
+      <select id="plaSelect"></select>
+
+      <label for="petgSelect">PETG filament profile</label>
+      <select id="petgSelect"></select>
+
+      <div class="modal-actions">
+        <button value="close" class="primary-btn small">Done</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="app.js"></script>
 </body>
