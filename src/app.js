@@ -259,6 +259,18 @@ function toast(msg, good = false) {
 // ---------- Step 2: what is it? ----------
 const api = window.easyprint;
 const job = { recipe: 'decoration', material: 'PLA', toggles: new Set() };
+let materialKnown = false; // has she told us what's loaded?
+
+function setMaterial(id, remember = true) {
+  job.material = id;
+  materialKnown = true;
+  if (remember) api.setSettings({ loadedMaterial: id });
+  onChoicesChanged();
+}
+document.querySelectorAll('#loadedChips button').forEach((b) => { b.onclick = () => setMaterial(b.dataset.id); });
+api?.getSettings?.().then((st) => {
+  if (st.loadedMaterial === 'PLA' || st.loadedMaterial === 'PETG') setMaterial(st.loadedMaterial, false);
+});
 let lastResult = null;   // { gcodePath, seconds, grams, ... }
 let lastJobKey = null;   // what the last result was made from
 let slicing = false;
@@ -286,7 +298,7 @@ async function setupChoices() {
     b.innerHTML = `<span class="seg-name"></span><span class="seg-blurb"></span>`;
     b.querySelector('.seg-name').textContent = m.label;
     b.querySelector('.seg-blurb').textContent = m.blurb;
-    b.onclick = () => { job.material = id; onChoicesChanged(); };
+    b.onclick = () => setMaterial(id);
     matList.appendChild(b);
   }
 
@@ -316,6 +328,8 @@ function jobKey() {
 function onChoicesChanged() {
   document.querySelectorAll('.recipe').forEach((b) => b.classList.toggle('selected', b.dataset.id === job.recipe));
   document.querySelectorAll('#materialList button').forEach((b) => b.classList.toggle('selected', b.dataset.id === job.material));
+  document.querySelectorAll('#loadedChips button').forEach((b) => b.classList.toggle('selected', materialKnown && b.dataset.id === job.material));
+  document.getElementById('loadedChips').classList.toggle('need', !materialKnown);
   document.querySelectorAll('#toggleList input').forEach((cb) => { cb.checked = job.toggles.has(cb.dataset.id); });
 
   const ready = !!model;
@@ -470,11 +484,17 @@ async function refreshAi() {
 async function runAsk() {
   const text = $('askInput').value.trim();
   if (!model || !text) { $('askInput').focus(); return; }
+  if (!materialKnown) {
+    const ans = $('askAnswer');
+    ans.hidden = false; ans.className = 'ask-answer err';
+    ans.textContent = 'First tap which filament is in the printer: PLA or PETG.';
+    return;
+  }
   const btn = $('askBtn');
   btn.disabled = true; btn.textContent = 'Thinking\u2026';
   const ans = $('askAnswer');
   ans.hidden = true;
-  const res = await api.ask({ description: text, fileName: currentFile?.name, ...shapeFacts() });
+  const res = await api.ask({ description: text, fileName: currentFile?.name, material: job.material, ...shapeFacts() });
   btn.disabled = false; btn.textContent = 'Ask';
   ans.hidden = false;
   if (!res.ok) { ans.className = 'ask-answer err'; ans.textContent = res.error; return; }
@@ -491,7 +511,7 @@ async function runAsk() {
   ans.append(b, document.createTextNode(` \u2013 ${res.reason}`));
   if (res.suggestPETG && job.material !== 'PETG') {
     const tip = document.createElement('span'); tip.className = 'tip';
-    tip.textContent = 'PETG would hold up better for this. Switch to it below if you have it loaded.';
+    tip.textContent = 'Tip: PETG would hold up better for this. If you have some, load it and tap PETG above.';
     ans.append(tip);
   }
 }

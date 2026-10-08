@@ -85,6 +85,13 @@
         <div class="step-head"><span class="num">2</span> What is it?</div>
         <div class="banner warn" id="orcaWarn" hidden></div>
         <div class="ask" id="askBox" hidden>
+          <div class="loaded-row">
+            <span class="loaded-q">Filament in the printer right now:</span>
+            <div class="chips" id="loadedChips">
+              <button data-id="PLA">PLA</button>
+              <button data-id="PETG">PETG</button>
+            </div>
+          </div>
           <label class="ask-label" for="askInput">Tell me what it is, and I’ll pick the settings</label>
           <div class="ask-row">
             <input id="askInput" type="text" maxlength="300" placeholder="e.g. a hook to hang a heavy bag" autocomplete="off">

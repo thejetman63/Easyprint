@@ -314,3 +314,15 @@ button:disabled { cursor: default; }
 .ask-or { margin-top: 12px; font-size: 12.5px; color: var(--muted); }
 .step.locked .ask-row { pointer-events: none; }
 .small-note { font-size: 12px; margin: 6px 0 0; }
+
+.loaded-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.loaded-q { font-size: 13px; color: var(--muted); }
+.chips { display: flex; gap: 6px; }
+.chips button {
+  border: 1.5px solid var(--line); background: #fff; border-radius: 999px;
+  padding: 5px 14px; font-size: 13px; font-weight: 650;
+}
+.chips button:hover { border-color: var(--accent); }
+.chips button.selected { border-color: var(--accent); background: var(--accent); color: #fff; }
+.chips.need button { border-color: #e0a020; }
+.step.locked .chips { pointer-events: none; }

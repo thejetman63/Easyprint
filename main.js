@@ -139,6 +139,7 @@ ipcMain.handle('orca:browse', async () => {
   return canceled ? null : filePaths[0];
 });
 
+ipcMain.handle('settings:get', () => settings);
 ipcMain.handle('ask:status', () => askAi.status(settings.ollamaModel));
 ipcMain.handle('ask:run', async (_e, input) => {
   try { return { ok: true, ...(await askAi.ask(input, settings.ollamaModel)) }; }

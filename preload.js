@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('easyprint', {
   openFolder: (dir) => ipcRenderer.invoke('folder:open', dir),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   browseOrca: () => ipcRenderer.invoke('orca:browse'),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
   askStatus: () => ipcRenderer.invoke('ask:status'),
   ask: (input) => ipcRenderer.invoke('ask:run', input),
   printer: {
