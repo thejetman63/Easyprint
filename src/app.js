@@ -316,6 +316,7 @@ function jobKey() {
 function onChoicesChanged() {
   document.querySelectorAll('.recipe').forEach((b) => b.classList.toggle('selected', b.dataset.id === job.recipe));
   document.querySelectorAll('#materialList button').forEach((b) => b.classList.toggle('selected', b.dataset.id === job.material));
+  document.querySelectorAll('#toggleList input').forEach((cb) => { cb.checked = job.toggles.has(cb.dataset.id); });
 
   const ready = !!model;
   $('step2').classList.toggle('locked', !ready);
@@ -412,6 +413,92 @@ $('saveBtn').onclick = async () => {
   if (r.ok) toast(`Saved to ${r.filePath}`, true);
 };
 
+// ---------- Ask box (local AI via Ollama) ----------
+let aiStatus = null;
+
+// rough shape facts the AI can't see for itself
+function shapeFacts() {
+  model.updateMatrixWorld(true);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const ab = new THREE.Vector3(), ac = new THREE.Vector3(), n = new THREE.Vector3();
+  let total = 0, overhang = 0;
+  model.traverse((m) => {
+    if (!m.isMesh) return;
+    const pos = m.geometry.attributes.position;
+    const idx = m.geometry.index;
+    const count = idx ? idx.count : pos.count;
+    const get = (i, v) => v.fromBufferAttribute(pos, idx ? idx.getX(i) : i).applyMatrix4(m.matrixWorld);
+    const step = Math.max(1, Math.floor(count / 3 / 200000)) * 3; // sample huge models
+    for (let i = 0; i + 2 < count; i += step) {
+      get(i, a); get(i + 1, b); get(i + 2, c);
+      n.crossVectors(ab.subVectors(b, a), ac.subVectors(c, a));
+      const area = n.length() / 2;
+      if (!area) continue;
+      total += area;
+      // facing down more than 45 degrees, and not sitting on the bed
+      if (n.z / (area * 2) < -0.707 && Math.min(a.z, b.z, c.z) > 0.4) overhang += area;
+    }
+  });
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3());
+  // how much of the outline actually touches the bed (bottom 0.4 mm)
+  let touch = 0;
+  model.traverse((m) => {
+    if (!m.isMesh) return;
+    const pos = m.geometry.attributes.position;
+    const idx = m.geometry.index;
+    const count = idx ? idx.count : pos.count;
+    const get = (i, v) => v.fromBufferAttribute(pos, idx ? idx.getX(i) : i).applyMatrix4(m.matrixWorld);
+    for (let i = 0; i + 2 < count; i += 3) {
+      get(i, a); get(i + 1, b); get(i + 2, c);
+      if (Math.max(a.z, b.z, c.z) < 0.4) touch += Math.abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2;
+    }
+  });
+  return {
+    size: `${fmt(size.x)} x ${fmt(size.y)} x ${fmt(size.z)}`,
+    overhangPct: total ? +(overhang / total * 100).toFixed(1) : 0,
+    footprintPct: size.x * size.y ? Math.min(100, Math.round(touch / (size.x * size.y) * 100)) : 0,
+  };
+}
+
+async function refreshAi() {
+  if (!api?.askStatus) return;
+  aiStatus = await api.askStatus();
+  $('askBox').hidden = !(aiStatus.running && aiStatus.model);
+}
+
+async function runAsk() {
+  const text = $('askInput').value.trim();
+  if (!model || !text) { $('askInput').focus(); return; }
+  const btn = $('askBtn');
+  btn.disabled = true; btn.textContent = 'Thinking\u2026';
+  const ans = $('askAnswer');
+  ans.hidden = true;
+  const res = await api.ask({ description: text, fileName: currentFile?.name, ...shapeFacts() });
+  btn.disabled = false; btn.textContent = 'Ask';
+  ans.hidden = false;
+  if (!res.ok) { ans.className = 'ask-answer err'; ans.textContent = res.error; return; }
+
+  job.recipe = res.recipe;
+  job.toggles = new Set(res.toggles);
+  onChoicesChanged();
+
+  const labels = (await api.choices());
+  const picked = [labels.recipes[res.recipe].label, ...res.toggles.map((t) => labels.toggles[t].label)];
+  ans.className = 'ask-answer';
+  ans.innerHTML = '';
+  const b = document.createElement('b'); b.textContent = picked.join(' + ');
+  ans.append(b, document.createTextNode(` \u2013 ${res.reason}`));
+  if (res.suggestPETG && job.material !== 'PETG') {
+    const tip = document.createElement('span'); tip.className = 'tip';
+    tip.textContent = 'PETG would hold up better for this. Switch to it below if you have it loaded.';
+    ans.append(tip);
+  }
+}
+
+$('askBtn').onclick = runAsk;
+$('askInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') runAsk(); });
+
 // ---------- Printer setup ----------
 function fillSelect(sel, options, current) {
   sel.innerHTML = '';
@@ -435,9 +522,15 @@ function fillSetup() {
   fillSelect($('machineSelect'), s.machines || [], s.machine);
   fillSelect($('plaSelect'), s.filaments?.PLA || [], s.filament?.PLA);
   fillSelect($('petgSelect'), s.filaments?.PETG || [], s.filament?.PETG);
+  const ai = aiStatus || {};
+  fillSelect($('aiSelect'), ai.models || [], ai.model);
+  $('aiNote').textContent = !ai.running
+    ? 'Ollama isn\u2019t running, so the box is hidden. Install it from ollama.com, then run: ollama pull qwen2.5:14b'
+    : !ai.models?.length ? 'Ollama is running but has no models. In a command window run: ollama pull qwen2.5:14b' : '';
 }
 
-$('setupBtn').onclick = () => { fillSetup(); $('setupDialog').showModal(); };
+$('setupBtn').onclick = async () => { await refreshAi(); fillSetup(); $('setupDialog').showModal(); };
+$('aiSelect').onchange = async (e) => { await api.setSettings({ ollamaModel: e.target.value }); await refreshAi(); fillSetup(); };
 $('browseOrcaBtn').onclick = async () => {
   const p = await api.browseOrca();
   if (p) { await refreshOrca(await api.setSettings({ orcaPath: p })); fillSetup(); }
@@ -449,6 +542,8 @@ $('petgSelect').onchange = async (e) => { await refreshOrca(await api.setSetting
 if (api?.choices) {
   setupChoices();
   refreshOrca();
+  refreshAi();
+  setInterval(refreshAi, 30000); // notice if Ollama is started later
 }
 
 // ---------- Step 3: printing over USB ----------

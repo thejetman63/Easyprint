@@ -4,6 +4,7 @@ const path = require('path');
 const { Orca } = require('./lib/orca');
 const recipes = require('./lib/recipes');
 const { Printer } = require('./lib/printer');
+const askAi = require('./lib/ask');
 
 // ---------- printer over USB ----------
 function makePrinter() {
@@ -136,6 +137,12 @@ ipcMain.handle('orca:browse', async () => {
     filters: [{ name: 'OrcaSlicer', extensions: ['exe'] }],
   });
   return canceled ? null : filePaths[0];
+});
+
+ipcMain.handle('ask:status', () => askAi.status(settings.ollamaModel));
+ipcMain.handle('ask:run', async (_e, input) => {
+  try { return { ok: true, ...(await askAi.ask(input, settings.ollamaModel)) }; }
+  catch (e) { return { ok: false, error: e.name === 'AbortError' ? 'The AI took too long to answer. Try again.' : e.message }; }
 });
 
 ipcMain.handle('printer:connect', async () => {

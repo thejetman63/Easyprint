@@ -13,6 +13,12 @@ OrcaSlicer does the slicing in the background.
 
 To get updates: open GitHub Desktop, click **Fetch origin**, then **Pull**, and start the app again.
 
+## The "Tell me what it is" box
+
+Install Ollama from https://ollama.com, then in a command window run `ollama pull qwen2.5:14b`.
+The box appears automatically while Ollama is running. The AI only picks from EasyPrint's own
+menu (preset + extras), so it can't produce settings that would wreck a print.
+
 ## How slicing works
 
 EasyPrint finds OrcaSlicer and uses the printer and filament profiles already set up in it
@@ -27,4 +33,4 @@ for the printer and changes only a few settings for each choice. The recipes liv
 - [x] Step 2 – Preset buttons, sliced by OrcaSlicer in the background, save G-code
 - [ ] Step 3 – Layer preview
 - [x] Step 4 – One-button USB printing with temperatures, progress, pause and stop (replaces Pronterface)
-- [ ] Step 5 – "Ask" box powered by a local Ollama model
+- [x] Step 5 – "Tell me what it is" box powered by a local Ollama model

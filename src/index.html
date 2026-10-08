@@ -84,6 +84,15 @@
       <div class="step locked" id="step2">
         <div class="step-head"><span class="num">2</span> What is it?</div>
         <div class="banner warn" id="orcaWarn" hidden></div>
+        <div class="ask" id="askBox" hidden>
+          <label class="ask-label" for="askInput">Tell me what it is, and I’ll pick the settings</label>
+          <div class="ask-row">
+            <input id="askInput" type="text" maxlength="300" placeholder="e.g. a hook to hang a heavy bag" autocomplete="off">
+            <button id="askBtn" class="ask-btn">Ask</button>
+          </div>
+          <div class="ask-answer" id="askAnswer" hidden></div>
+          <div class="ask-or">Or pick yourself:</div>
+        </div>
         <div class="recipe-list" id="recipeList"></div>
 
         <div class="sub-label">Filament</div>
@@ -176,6 +185,10 @@
 
       <label for="petgSelect">PETG filament profile</label>
       <select id="petgSelect"></select>
+
+      <label for="aiSelect">AI for the “Tell me what it is” box (Ollama)</label>
+      <select id="aiSelect"></select>
+      <div class="muted small-note" id="aiNote"></div>
 
       <div class="modal-actions">
         <button value="close" class="primary-btn small">Done</button>
