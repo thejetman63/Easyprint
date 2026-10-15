@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>EasyPrint</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-TzwCV9RwRLSFYKbujM56lQiJX5fNozHrr3XXJw0mL1U='">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-TzwCV9RwRLSFYKbujM56lQiJX5fNozHrr3XXJw0mL1U='">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
   {
@@ -33,6 +33,7 @@
       <canvas id="scene"></canvas>
       <div class="viewer-hint" id="viewerHint">Drag to turn · Scroll to zoom · Right-drag to move</div>
       <div class="drop-overlay" id="dropOverlay">Drop it here</div>
+      <div class="opening" id="openingNote" hidden><span class="spinner"></span> Opening the model…</div>
     </section>
 
     <aside class="panel">
@@ -48,6 +49,11 @@
 
         <div class="model-info" id="modelInfo" hidden>
           <div class="model-name" id="modelName"></div>
+          <div class="plate-box" id="plateBox" hidden>
+            <div class="plate-intro" id="plateIntro"></div>
+            <div class="plate-list" id="plateList"></div>
+          </div>
+          <div class="banner warn" id="plateNote" hidden></div>
           <div class="model-size" id="modelSize"></div>
           <div class="fit" id="fitBadge"></div>
           <div class="unit-note" id="unitNote" hidden></div>

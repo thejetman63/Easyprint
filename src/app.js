@@ -4,6 +4,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+import { readProject, colorName } from './project3mf.js';
 
 // Ender-3 V3 SE build volume, in millimeters
 const BED = { x: 220, y: 220, z: 250 };
@@ -92,17 +93,50 @@ let scalePct = 100;
 let currentFile = null; // { name, path }
 let modelFits = false;
 
+// show a project plate in its own filament colour
+const plateMat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.05 });
+function previewMat() {
+  const c = currentPlate?.colors?.length === 1 ? currentPlate.colors[0].slice(0, 7) : null;
+  if (!c) return modelMat;
+  plateMat.color.set(c);
+  // very dark filament is hard to see on the dark bed
+  const hsl = {}; plateMat.color.getHSL(hsl);
+  if (hsl.l < 0.18) plateMat.color.setHSL(hsl.h, hsl.s, 0.22);
+  return plateMat;
+}
+
+let project = null;      // a Bambu/Orca project with plates
+let currentPlate = null;
+const printedPlates = new Set();
+
 async function loadFile(file) {
+  $('openingNote').hidden = false;
+  await new Promise((r) => setTimeout(r, 30)); // let the "Opening" note show
+  try { await loadFileInner(file); } finally { $('openingNote').hidden = true; }
+}
+
+async function loadFileInner(file) {
   const ext = file.name.split('.').pop().toLowerCase();
   const buf = await file.arrayBuffer();
   let obj;
+  project = null; currentPlate = null; printedPlates.clear();
 
   try {
     if (ext === 'stl') {
       const geo = new STLLoader().parse(buf);
       obj = new THREE.Mesh(geo, modelMat);
     } else if (ext === '3mf') {
-      obj = new ThreeMFLoader().parse(buf);
+      try {
+        const proj = readProject(buf);
+        project = proj;
+        currentPlate = proj.plates[0];
+        obj = proj.build(currentPlate, modelMat);
+        if (!obj.children.length) throw new Error('empty');
+      } catch (e) {
+        console.warn('project reader failed, using basic 3MF loader', e);
+        project = null; currentPlate = null;
+        obj = new ThreeMFLoader().parse(buf);
+      }
     } else if (ext === 'obj') {
       obj = new OBJLoader().parse(new TextDecoder().decode(buf));
       obj.rotation.x = Math.PI / 2; // OBJ files are usually Y-up
@@ -114,12 +148,20 @@ async function loadFile(file) {
     return toast('Couldn’t read that file. It may be damaged.');
   }
 
+  currentFile = { name: file.name, path: window.easyprint?.pathForFile?.(file) || null };
+  showObject(obj, { guess: !project });
+  renderPlates();
+}
+
+// put an object (or a group of them) on the bed
+function showObject(obj, { guess = true } = {}) {
   // one consistent look, regardless of file colours
   obj.traverse((c) => {
     if (c.isMesh) {
       c.material = modelMat;
       // many STL files store blank normals, which renders the model black
-      c.geometry.computeVertexNormals();
+      if (!c.geometry.attributes.normal) c.geometry.computeVertexNormals();
+      else if (guess) c.geometry.computeVertexNormals();
     }
   });
 
@@ -141,14 +183,66 @@ async function loadFile(file) {
   // Guess from the size, like OrcaSlicer does, and let her change it.
   const raw = box.getSize(new THREE.Vector3());
   rawMax = Math.max(raw.x, raw.y, raw.z);
-  setUnits(guessUnits(rawMax), true);
+  setUnits(guess ? guessUnits(rawMax) : 'mm', guess);
 
   scalePct = 100;
-  currentFile = { name: file.name, path: window.easyprint?.pathForFile?.(file) || null };
   placeOnBed();
   $('modelInfo').hidden = false;
-  $('modelName').textContent = file.name;
+  $('modelName').textContent = modelDisplayName();
   $('viewerHint').hidden = false;
+}
+
+function modelDisplayName() {
+  const base = currentFile?.name || '';
+  return project?.isMultiPlate && currentPlate ? `${base.replace(/\.3mf$/i, '')} – ${currentPlate.name}` : base;
+}
+
+// what colour to load for the chosen plate
+function plateColorText(p = currentPlate) {
+  if (!p?.colors?.length) return null;
+  const names = [...new Set(p.colors.map(colorName).filter(Boolean))];
+  return names.length ? names.join(' and ') : null;
+}
+
+function renderPlates() {
+  const box = $('plateList');
+  box.innerHTML = '';
+  $('plateBox').hidden = !project?.isMultiPlate;
+  if (!project?.isMultiPlate) { updatePlateNote(); return; }
+  $('plateIntro').textContent = `This project has ${project.plates.length} plates. Print them one at a time:`;
+  for (const p of project.plates) {
+    const b = document.createElement('button');
+    b.className = 'plate' + (p === currentPlate ? ' selected' : '') + (printedPlates.has(p.id) ? ' done' : '');
+    if (p.thumb) { const img = document.createElement('img'); img.src = p.thumb; img.alt = ''; b.appendChild(img); }
+    const t = document.createElement('div'); t.className = 'plate-text';
+    const n = document.createElement('div'); n.className = 'plate-name'; n.textContent = (printedPlates.has(p.id) ? '✓ ' : '') + p.name;
+    const d = document.createElement('div'); d.className = 'plate-meta';
+    const parts = p.objectIds.length;
+    d.textContent = `${parts} part${parts > 1 ? 's' : ''}`;
+    for (const c of p.colors || []) { const sw = document.createElement('span'); sw.className = 'swatch'; sw.style.background = c.slice(0, 7); sw.title = colorName(c) || c; d.appendChild(sw); }
+    t.append(n, d); b.appendChild(t);
+    b.onclick = () => choosePlate(p);
+    box.appendChild(b);
+  }
+  updatePlateNote();
+}
+
+function choosePlate(p) {
+  if (p === currentPlate) return;
+  currentPlate = p;
+  showObject(project.build(p, modelMat), { guess: false });
+  renderPlates();
+}
+
+function updatePlateNote() {
+  const note = $('plateNote');
+  const color = plateColorText();
+  const many = (currentPlate?.colors?.length || 0) > 1 || currentPlate?.painted;
+  if (!currentPlate || (!color && !many)) { note.hidden = true; return; }
+  note.hidden = false;
+  note.textContent = many
+    ? `This plate was designed in ${color || 'several colors'}. Your printer has one nozzle, so it will print in whatever filament is loaded.`
+    : `Load ${color} filament for this plate.`;
 }
 
 // sit the model flat on the bed, centred, and refresh the info panel
@@ -174,7 +268,7 @@ function placeOnBed() {
   badge.textContent = fits
     ? 'Fits on the printer ✓'
     : 'Too big for the printer. Make it smaller or turn it.';
-  model.traverse((m) => { if (m.isMesh) m.material = fits ? modelMat : tooBigMat; });
+  model.traverse((m) => { if (m.isMesh) m.material = fits ? previewMat() : tooBigMat; });
 
   // keep the camera looking at the model
   controls.target.set(BED.x / 2, BED.y / 2, Math.min(size.z / 2, 80));
@@ -321,7 +415,7 @@ async function setupChoices() {
 function jobKey() {
   if (!model) return null;
   const m = model.children[0].quaternion;
-  return JSON.stringify([currentFile?.name, scalePct, m.toArray().map((v) => v.toFixed(4)),
+  return JSON.stringify([currentFile?.name, currentPlate?.id, scalePct, m.toArray().map((v) => v.toFixed(4)),
     job.recipe, job.material, [...job.toggles].sort()]);
 }
 
@@ -361,9 +455,15 @@ async function refreshOrca(status) {
 }
 
 // the model exactly as shown (size and turns included), as an STL file
-function exportModelStl() {
+// one STL per part, exactly as shown (size and turns included).
+// Orca lays the parts out on the bed itself.
+function exportModelStls() {
   model.updateMatrixWorld(true);
-  return new STLExporter().parse(model, { binary: true }).buffer;
+  const meshes = [];
+  model.traverse((m) => { if (m.isMesh) meshes.push(m); });
+  const ex = new STLExporter();
+  if (meshes.length <= 1) return [ex.parse(model, { binary: true }).buffer];
+  return meshes.map((m) => ex.parse(m, { binary: true }).buffer);
 }
 
 async function slice() {
@@ -376,8 +476,8 @@ async function slice() {
   onChoicesChanged();
 
   const res = await api.slice({
-    stl: exportModelStl(),
-    modelName: currentFile?.name,
+    stls: exportModelStls(),
+    modelName: modelDisplayName(),
     recipe: job.recipe,
     toggles: [...job.toggles],
     material: job.material,
@@ -494,7 +594,7 @@ async function runAsk() {
   btn.disabled = true; btn.textContent = 'Thinking\u2026';
   const ans = $('askAnswer');
   ans.hidden = true;
-  const res = await api.ask({ description: text, fileName: currentFile?.name, material: job.material, ...shapeFacts() });
+  const res = await api.ask({ description: text, fileName: modelDisplayName(), material: job.material, ...shapeFacts() });
   btn.disabled = false; btn.textContent = 'Ask';
   ans.hidden = false;
   if (!res.ok) { ans.className = 'ask-answer err'; ans.textContent = res.error; return; }
@@ -570,6 +670,7 @@ if (api?.choices) {
 const pr = api?.printer;
 let printerStatus = { connected: false, temps: {}, job: null };
 let printingName = '';
+let printingPlate = null;
 let connecting = false;
 
 const deg = (v) => (v == null ? '–' : `${Math.round(v)}°`);
@@ -598,8 +699,8 @@ function updatePrintButton() {
   btn.textContent = 'Print';
   $('printHint').textContent = !lastResult ? 'Get it ready first'
     : !fresh ? 'Press Get it ready again first'
-    : printerStatus.connected ? 'Starts printing straight away'
-    : 'Connects to the printer and starts';
+    : (plateColorText() && (currentPlate?.colors?.length === 1) ? `Load ${plateColorText()} filament first. ` : '')
+      + (printerStatus.connected ? 'Starts printing straight away' : 'Connects to the printer and starts');
 }
 
 async function connectPrinter() {
@@ -636,7 +737,8 @@ async function startPrint(gcodePath, name, estimateSeconds) {
 
 $('printBtn').onclick = () => {
   if (!lastResult) return;
-  startPrint(lastResult.gcodePath, currentFile?.name || 'Your print', lastResult.seconds);
+  printingPlate = currentPlate;
+  startPrint(lastResult.gcodePath, modelDisplayName() || 'Your print', lastResult.seconds);
 };
 
 $('printFileBtn').onclick = async () => {
@@ -666,8 +768,17 @@ function updateSheet() {
     printerStatus.temps.nozzle < printerStatus.temps.nozzleTarget - 3;
   $('psTitle').textContent = j.failed ? 'The print stopped' : j.stopped ? 'Print stopped'
     : j.finished ? 'Finished! \ud83c\udf89' : j.paused ? 'Paused' : heating ? 'Heating up' : 'Printing';
+  let doneNote = 'Let the bed cool for a few minutes before taking it off.';
+  if (j.finished && !j.stopped && !j.failed && printingPlate && project?.isMultiPlate) {
+    if (!printedPlates.has(printingPlate.id)) { printedPlates.add(printingPlate.id); renderPlates(); }
+    const next = project.plates.find((p) => !printedPlates.has(p.id));
+    if (next) {
+      const c = plateColorText(next);
+      doneNote += ` Next up: \u201c${next.name}\u201d${c ? ` in ${c}` : ''}. Pick it in step 1 when you\u2019re ready.`;
+    } else doneNote += ' That\u2019s every plate in this project done!';
+  }
   $('psNote').textContent = j.paused ? 'The nozzle lifted out of the way. Press Resume to carry on.'
-    : j.finished && !j.stopped && !j.failed ? 'Let the bed cool for a few minutes before taking it off.' : '';
+    : j.finished && !j.stopped && !j.failed ? doneNote : '';
 
   $('pauseBtn').hidden = j.finished;
   $('stopBtn').hidden = j.finished;
@@ -917,4 +1028,4 @@ if (bedApi) {
 }
 
 // handy for testing
-window.__easyprint = { loadFile, get file() { return currentFile; }, exportModelStl };
+window.__easyprint = { loadFile, get file() { return currentFile; }, exportModelStls, get project() { return project; } };

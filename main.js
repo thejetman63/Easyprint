@@ -95,14 +95,19 @@ ipcMain.handle('orca:status', () => {
   try { return orca.status(); } catch (e) { return { error: e.message }; }
 });
 
-ipcMain.handle('orca:slice', async (_e, { stl, modelName, recipe, toggles, material }) => {
-  const tmp = path.join(app.getPath('temp'), 'easyprint');
+ipcMain.handle('orca:slice', async (_e, { stls, stl, modelName, recipe, toggles, material }) => {
+  const tmp = path.join(app.getPath('temp'), 'easyprint', 'models');
+  fs.rmSync(tmp, { recursive: true, force: true });
   fs.mkdirSync(tmp, { recursive: true });
-  const stlPath = path.join(tmp, 'model.stl');
-  fs.writeFileSync(stlPath, Buffer.from(stl));
+  // one file per part, so Orca treats them as separate objects and lays them out
+  const stlPaths = (stls || [stl]).map((buf, i) => {
+    const p = path.join(tmp, `part_${i + 1}.stl`);
+    fs.writeFileSync(p, Buffer.from(buf));
+    return p;
+  });
   try {
     const result = await orca.slice({
-      stlPath, modelName, recipe, toggles, material,
+      stlPaths, modelName, recipe, toggles, material,
       onLog: (t) => win?.webContents.send('orca:log', t),
     });
     return { ok: true, ...result };
