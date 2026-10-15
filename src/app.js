@@ -626,6 +626,7 @@ $('connectBtn').onclick = async () => {
 async function startPrint(gcodePath, name, estimateSeconds) {
   $('printError').hidden = true;
   if (!printerStatus.connected && !(await connectPrinter())) return;
+  if (!(await zPreflight())) return;
   const r = await pr.print(gcodePath, estimateSeconds);
   if (!r.ok) { $('printError').hidden = false; $('printError').textContent = r.error; return; }
   printingName = name;
@@ -683,6 +684,7 @@ if (pr) {
   pr.onStatus((s) => {
     printerStatus = s;
     updatePill(); updatePrintButton(); updateSheet();
+    const nc = document.getElementById('bedNotConnected'); if (nc) nc.hidden = s.connected;
   });
   pr.onProblem((m) => {
     $('printError').hidden = false;
@@ -691,6 +693,227 @@ if (pr) {
   });
   pr.status().then((s) => { printerStatus = s; updatePill(); updatePrintButton(); });
   setInterval(() => { if (isPrinting()) pr.status().then((s) => { printerStatus = s; updateSheet(); }); }, 5000);
+}
+
+// ---------- Bed setup ----------
+const bedApi = api?.bed;
+let bedSettings = {};
+let lastGrid = null;
+
+async function loadBedSettings() {
+  bedSettings = (await api.getSettings()) || {};
+  $('zTarget').value = typeof bedSettings.zTarget === 'number' ? bedSettings.zTarget.toFixed(2) : '';
+  $('zCheck').checked = bedSettings.zCheck !== false;
+  $('zAuto').checked = !!bedSettings.zAuto;
+  document.querySelectorAll('#knobChips button').forEach((b) => b.classList.toggle('selected',
+    bedSettings.bedKnobs === undefined ? false : (b.dataset.id === 'yes') === bedSettings.bedKnobs));
+  $('knobChips').classList.toggle('need', bedSettings.bedKnobs === undefined);
+}
+async function saveBed(patch) { await api.setSettings(patch); Object.assign(bedSettings, patch); }
+
+const zFmt = (v) => (typeof v === 'number' ? v.toFixed(2) : '–');
+const sameZ = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 0.005;
+
+async function ensureConnected() {
+  if (printerStatus.connected) return true;
+  return connectPrinter();
+}
+
+function showZ(now) {
+  $('zNow').textContent = zFmt(now);
+  const target = bedSettings.zTarget;
+  const st = $('zStatus');
+  $('zSetBtn').hidden = true;
+  if (typeof now !== 'number') { st.className = 'z-status'; st.textContent = ''; return; }
+  if (typeof target !== 'number') {
+    st.className = 'z-status';
+    st.textContent = 'Type your Z-offset on the left and press Save, so EasyPrint can keep the printer at it.';
+  } else if (sameZ(now, target)) {
+    st.className = 'z-status ok'; st.textContent = '\u2713 The printer matches your Z-offset.';
+  } else {
+    st.className = 'z-status bad';
+    st.textContent = `The printer is at ${zFmt(now)}, not your ${zFmt(target)}. Leveling usually does this.`;
+    $('zSetBtn').hidden = false;
+    $('zSetBtn').textContent = `Set the printer to ${zFmt(target)}`;
+  }
+}
+
+async function readZNow() {
+  if (!(await ensureConnected())) return null;
+  const r = await bedApi.readZ();
+  if (!r.ok) { bedErr(r.error); return null; }
+  showZ(r.zOffset);
+  return r.zOffset;
+}
+
+async function setZ(v) {
+  const r = await bedApi.setZ(v);
+  if (!r.ok) { bedErr(r.error); return false; }
+  showZ(r.zOffset);
+  return true;
+}
+
+function bedErr(msg) { const e = $('bedError'); e.hidden = !msg; e.textContent = msg || ''; if (msg) toast(msg); }
+
+// before each print: make sure the printer is at her Z-offset
+async function zPreflight() {
+  if (!bedApi || typeof bedSettings.zTarget !== 'number' || bedSettings.zCheck === false) return true;
+  const r = await bedApi.readZ();
+  if (!r.ok || typeof r.zOffset !== 'number') return true; // can't tell; don't block the print
+  if (sameZ(r.zOffset, bedSettings.zTarget)) return true;
+  if (bedSettings.zAuto) {
+    const ok = await setZ(bedSettings.zTarget);
+    if (ok) toast(`Z-offset set back to ${zFmt(bedSettings.zTarget)}`, true);
+    return true;
+  }
+  $('zDialogText').textContent = `The printer's Z-offset is ${zFmt(r.zOffset)}, but yours is ${zFmt(bedSettings.zTarget)}. This usually happens after leveling.`;
+  $('zDialogFix').textContent = `Set it to ${zFmt(bedSettings.zTarget)} and print`;
+  const d = $('zDialog');
+  d.showModal();
+  const choice = await new Promise((res) => d.addEventListener('close', () => res(d.returnValue), { once: true }));
+  if (choice === 'fix') return setZ(bedSettings.zTarget);
+  return choice === 'anyway';
+}
+
+// ---- mesh drawing ----
+function meshColor(v, center) {
+  const t = Math.max(-1, Math.min(1, (v - center) / 0.3));
+  const mid = [42, 165, 149], low = [59, 125, 216], high = [210, 86, 63];
+  const to = t < 0 ? low : high, k = Math.abs(t);
+  return `rgb(${mid.map((c, i) => Math.round(c + (to[i] - c) * k)).join(',')})`;
+}
+
+function drawMesh(canvas, grid, withNumbers) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height, pad = withNumbers ? 24 : 6;
+  const inset = withNumbers ? 24 : 0; // keep the numbers clear of the edge labels
+  const ny = grid.length, nx = grid[0].length;
+  const flat = grid.flat(); const center = flat.reduce((a, b) => a + b, 0) / flat.length;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#3a3836'; ctx.fillRect(0, 0, W, H);
+  const iw = W - pad * 2, ih = H - pad * 2, res = 40;
+  // smooth colours between measured points
+  for (let py = 0; py < res; py++) for (let px = 0; px < res; px++) {
+    const fx = (px + 0.5) / res * (nx - 1), fy = (py + 0.5) / res * (ny - 1);
+    const i = Math.min(nx - 2, Math.floor(fx)), j = Math.min(ny - 2, Math.floor(fy));
+    const u = fx - i, w = fy - j;
+    const v = grid[j][i] * (1 - u) * (1 - w) + grid[j][i + 1] * u * (1 - w) + grid[j + 1][i] * (1 - u) * w + grid[j + 1][i + 1] * u * w;
+    ctx.fillStyle = meshColor(v, center);
+    // row 0 is the front, drawn at the bottom
+    ctx.fillRect(pad + px * iw / res, pad + ih - (py + 1) * ih / res, iw / res + 1, ih / res + 1);
+  }
+  if (withNumbers) {
+    ctx.font = '600 11px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      const x = pad + inset + i / (nx - 1) * (iw - inset * 2), y = pad + ih - inset * 0.6 - j / (ny - 1) * (ih - inset * 1.2);
+      const v = grid[j][i] - center;
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(x - 19, y - 8, 38, 16);
+      ctx.fillStyle = '#fff'; ctx.fillText((v >= 0 ? '+' : '') + v.toFixed(2), x, y);
+    }
+    ctx.fillStyle = '#f6f3ee'; ctx.font = '600 11px Segoe UI, system-ui, sans-serif';
+    ctx.fillText('BACK', W / 2, 12); ctx.fillText('FRONT (door side)', W / 2, H - 11);
+    ctx.save(); ctx.translate(11, H / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('LEFT', 0, 0); ctx.restore();
+    ctx.save(); ctx.translate(W - 11, H / 2); ctx.rotate(Math.PI / 2); ctx.fillText('RIGHT', 0, 0); ctx.restore();
+  }
+}
+
+function showMesh(grid, analysis, before) {
+  $('meshArea').hidden = false;
+  drawMesh($('meshMap'), grid, true);
+  $('beforeFig').hidden = !before;
+  if (before) drawMesh($('beforeMap'), before, false);
+  $('meshCaption').textContent = before ? 'Now' : 'Your bed (numbers are mm above/below average)';
+  const v = $('meshVerdict'); v.className = `verdict ${analysis.level}`; v.textContent = analysis.verdict;
+  $('meshRange').textContent = `Highest to lowest point: ${analysis.range.toFixed(2)} mm` + (analysis.tilt.length ? ` \u00b7 ${analysis.tilt.join(', ')}` : '');
+  const ol = $('meshSteps'); ol.innerHTML = '';
+  for (const st of analysis.steps) { const li = document.createElement('li'); li.textContent = st.text; ol.appendChild(li); }
+  const notes = $('meshNotes'); notes.innerHTML = '';
+  for (const n of analysis.notes) { const p = document.createElement('p'); p.textContent = n; notes.appendChild(p); }
+  if (bedSettings.bedKnobs === undefined && analysis.steps.length) {
+    const p = document.createElement('p'); p.textContent = 'Answer the knob question above for turn-by-turn steps.'; notes.appendChild(p);
+  }
+}
+
+function bedBusy(msg) {
+  $('bedProgress').hidden = !msg;
+  $('bedProgressText').textContent = msg || '';
+  ['meshReadBtn', 'meshMeasureBtn', 'zSetBtn', 'zReadBtn', 'infoBtn'].forEach((id) => { $(id).disabled = !!msg; });
+}
+
+async function readMesh() {
+  bedErr(null);
+  if (!(await ensureConnected())) return;
+  bedBusy('Reading the bed from the printer\u2026');
+  const r = await bedApi.readMesh();
+  bedBusy(null);
+  if (!r.ok) return bedErr(r.error);
+  lastGrid = r.grid;
+  showMesh(r.grid, r.analysis, null);
+}
+
+async function measureMesh() {
+  bedErr(null);
+  if (!(await ensureConnected())) return;
+  const before = lastGrid;
+  bedBusy('Starting\u2026');
+  const r = await bedApi.measure(job.material);
+  if (!r.ok) { bedBusy(null); return bedErr(r.error); }
+  lastGrid = r.grid;
+  // measuring resets the printer's Z-offset, so put hers back
+  if (typeof bedSettings.zTarget === 'number') {
+    bedBusy('Putting your Z-offset back\u2026');
+    const z = await bedApi.readZ();
+    if (z.ok && !sameZ(z.zOffset, bedSettings.zTarget)) {
+      if (await setZ(bedSettings.zTarget)) toast(`Measuring changed the Z-offset to ${zFmt(z.zOffset)}. Set it back to ${zFmt(bedSettings.zTarget)}.`, true);
+    } else if (z.ok) showZ(z.zOffset);
+  }
+  bedBusy(null);
+  showMesh(r.grid, r.analysis, before);
+}
+
+if (bedApi) {
+  bedApi.onProgress((m) => bedBusy(m));
+  $('bedBtn').onclick = async () => {
+    await loadBedSettings();
+    $('bedNotConnected').hidden = printerStatus.connected;
+    bedErr(null);
+    $('bedDialog').showModal();
+    if (printerStatus.connected && !isPrinting()) readZNow();
+  };
+  $('bedClose').onclick = () => $('bedDialog').close();
+  $('zSaveBtn').onclick = async () => {
+    const v = Math.round(parseFloat($('zTarget').value) * 100) / 100;
+    if (!(v >= -5 && v <= 1)) return bedErr('That doesn\u2019t look like a Z-offset. It should be a small number like -2.07.');
+    bedErr(null);
+    await saveBed({ zTarget: v });
+    $('zTarget').value = v.toFixed(2);
+    toast(`Saved. EasyPrint will keep the printer at ${v.toFixed(2)}.`, true);
+    if (printerStatus.connected) readZNow(); else showZ(null);
+  };
+  $('zReadBtn').onclick = () => { bedErr(null); readZNow(); };
+  $('zSetBtn').onclick = async () => { bedBusy('Setting the Z-offset\u2026'); const ok = await setZ(bedSettings.zTarget); bedBusy(null); if (ok) toast('Z-offset set and saved in the printer.', true); };
+  $('zCheck').onchange = (e) => saveBed({ zCheck: e.target.checked });
+  $('zAuto').onchange = (e) => saveBed({ zAuto: e.target.checked });
+  document.querySelectorAll('#knobChips button').forEach((b) => {
+    b.onclick = async () => {
+      await saveBed({ bedKnobs: b.dataset.id === 'yes' });
+      await loadBedSettings();
+      if (lastGrid) showMesh(lastGrid, await bedApi.analyze(lastGrid), null);
+    };
+  });
+  $('meshReadBtn').onclick = readMesh;
+  $('meshMeasureBtn').onclick = measureMesh;
+  $('infoBtn').onclick = async () => {
+    if (!(await ensureConnected())) return;
+    bedBusy('Reading printer details\u2026');
+    const r = await bedApi.info();
+    bedBusy(null);
+    if (!r.ok) return bedErr(r.error);
+    $('infoText').hidden = false; $('infoText').textContent = r.text;
+    $('infoCopy').hidden = false;
+  };
+  $('infoCopy').onclick = () => { navigator.clipboard.writeText($('infoText').textContent); toast('Copied', true); };
+  loadBedSettings();
 }
 
 // handy for testing

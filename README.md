@@ -27,6 +27,16 @@ for the printer and changes only a few settings for each choice. The recipes liv
 `lib/recipes.js`. If something goes wrong, the error box has **Show details** and
 **Open job folder**, which holds `orca-log.txt` to send to Claude.
 
+## Bed setup
+
+**▦ Bed setup** (top right):
+- **Z-offset:** save your value (e.g. -2.07). EasyPrint checks the printer before every print and
+  after measuring the bed, and puts it back if leveling changed it. Values outside -5 to 1 are refused.
+- **Bed level:** *Check my bed* reads the mesh the printer already has; *Measure again* heats the bed,
+  homes and re-probes. You get a colour map, a verdict, and corner-by-corner knob instructions,
+  with a before/after map.
+- **Printer details:** read-only dump of M115 / M503 / M851 / M420 V for troubleshooting.
+
 ## Progress
 
 - [x] Step 1 – Open a model and see it on the bed (size, fit check, resize, turn)
@@ -34,3 +44,4 @@ for the printer and changes only a few settings for each choice. The recipes liv
 - [ ] Step 3 – Layer preview
 - [x] Step 4 – One-button USB printing with temperatures, progress, pause and stop (replaces Pronterface)
 - [x] Step 5 – "Tell me what it is" box powered by a local Ollama model
+- [x] Bed setup – keep my Z-offset, bed mesh map with knob instructions

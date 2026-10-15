@@ -23,6 +23,7 @@
         <span id="printerText">Printer not connected</span>
         <button class="pill-btn" id="connectBtn">Connect</button>
       </div>
+      <button class="setup-btn" id="bedBtn" title="Bed setup">▦ Bed setup</button>
       <button class="setup-btn" id="setupBtn" title="Printer setup">⚙ Printer setup</button>
     </div>
   </header>
@@ -161,6 +162,84 @@
     </div>
     <div class="ps-foot">Keep this computer on and the USB cable plugged in until it finishes.</div>
   </div>
+
+  <dialog class="modal wide" id="bedDialog">
+    <div class="bed-wrap">
+      <div class="bed-head">
+        <h2>Bed setup</h2>
+        <button class="x-btn" id="bedClose" title="Close">✕</button>
+      </div>
+      <div class="banner warn" id="bedNotConnected" hidden>The printer isn’t connected. The buttons below will connect it first.</div>
+
+      <section class="bed-sec">
+        <h3>Z-offset <span class="muted">(how close the nozzle starts to the bed)</span></h3>
+        <div class="z-grid">
+          <div>
+            <div class="k">Your Z-offset</div>
+            <div class="z-input">
+              <input type="number" id="zTarget" step="0.01" placeholder="-2.07">
+              <button class="secondary-btn inline" id="zSaveBtn">Save</button>
+            </div>
+          </div>
+          <div>
+            <div class="k">Printer is set to</div>
+            <div class="z-now"><span id="zNow">–</span> <button class="link-btn" id="zReadBtn">Check</button></div>
+          </div>
+        </div>
+        <div class="z-status" id="zStatus"></div>
+        <button class="primary-btn small" id="zSetBtn" hidden>Set the printer to -2.07</button>
+        <label class="check"><input type="checkbox" id="zCheck" checked> Check it every time a print starts</label>
+        <label class="check"><input type="checkbox" id="zAuto"> Fix it automatically without asking</label>
+      </section>
+
+      <section class="bed-sec">
+        <h3>Bed level</h3>
+        <div class="loaded-row">
+          <span class="loaded-q">Can you adjust the bed corners with knobs underneath?</span>
+          <div class="chips" id="knobChips"><button data-id="yes">Yes</button><button data-id="no">No</button></div>
+        </div>
+        <div class="bed-actions">
+          <button class="secondary-btn inline" id="meshReadBtn">Check my bed</button>
+          <button class="secondary-btn inline" id="meshMeasureBtn">Measure again (heats the bed, a few minutes)</button>
+        </div>
+        <div class="slice-status" id="bedProgress" hidden><span class="spinner"></span><span id="bedProgressText"></span></div>
+        <div class="banner error" id="bedError" hidden></div>
+        <div class="mesh-area" id="meshArea" hidden>
+          <div class="maps">
+            <figure id="beforeFig" hidden><canvas id="beforeMap" width="200" height="200"></canvas><figcaption>Before</figcaption></figure>
+            <figure><canvas id="meshMap" width="300" height="300"></canvas><figcaption id="meshCaption">Now</figcaption></figure>
+          </div>
+          <div class="mesh-info">
+            <div class="verdict" id="meshVerdict"></div>
+            <div class="muted" id="meshRange"></div>
+            <ol class="steps" id="meshSteps"></ol>
+            <div class="mesh-notes" id="meshNotes"></div>
+            <div class="legend"><span class="sw low"></span>low <span class="sw mid"></span>level <span class="sw high"></span>high</div>
+          </div>
+        </div>
+      </section>
+
+      <details class="bed-sec">
+        <summary>Printer details (for troubleshooting)</summary>
+        <p class="muted">Reads the printer’s settings. It doesn’t change anything.</p>
+        <button class="secondary-btn inline" id="infoBtn">Read printer details</button>
+        <button class="link-btn" id="infoCopy" hidden>Copy</button>
+        <pre class="log" id="infoText" hidden></pre>
+      </details>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="zDialog">
+    <form method="dialog">
+      <h2>Z-offset changed</h2>
+      <p id="zDialogText"></p>
+      <div class="modal-actions">
+        <button value="cancel" class="link-btn" style="margin-right:auto">Cancel</button>
+        <button value="anyway" class="secondary-btn inline">Print anyway</button>
+        <button value="fix" class="primary-btn small" id="zDialogFix">Fix it and print</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog class="modal" id="confirmStop">
     <form method="dialog">

@@ -5,6 +5,7 @@ const { Orca } = require('./lib/orca');
 const recipes = require('./lib/recipes');
 const { Printer } = require('./lib/printer');
 const askAi = require('./lib/ask');
+const bed = require('./lib/bed');
 
 // ---------- printer over USB ----------
 function makePrinter() {
@@ -145,6 +146,68 @@ ipcMain.handle('ask:run', async (_e, input) => {
   try { return { ok: true, ...(await askAi.ask(input, settings.ollamaModel)) }; }
   catch (e) { return { ok: false, error: e.name === 'AbortError' ? 'The AI took too long to answer. Try again.' : e.message }; }
 });
+
+// ---------- bed setup ----------
+const wrap = (fn) => async (_e, arg) => {
+  try { return { ok: true, ...(await fn(arg)) }; } catch (e) { return { ok: false, error: e.message }; }
+};
+const logStep = (t) => logLines.push(`[EasyPrint] ${t}`);
+
+async function readZ() {
+  const [lines] = await printer.query('M851');
+  let z = bed.parseZOffset(lines);
+  if (z === null) z = bed.parseZOffset((await printer.query('M503'))[0]);
+  return z;
+}
+
+// read-only: what the printer is and how it reports things
+ipcMain.handle('bed:info', wrap(async () => {
+  const [fw, cfg, probe, mesh] = await printer.query(['M115', 'M503', 'M851', 'M420 V']);
+  const text = [
+    '> M115', ...fw, '', '> M503', ...cfg, '', '> M851', ...probe, '', '> M420 V', ...mesh,
+  ].join('\n');
+  return { text, zOffset: bed.parseZOffset([...probe, ...cfg]), meshFound: !!bed.parseMesh(mesh) };
+}));
+
+ipcMain.handle('bed:readZ', wrap(async () => ({ zOffset: await readZ() })));
+
+ipcMain.handle('bed:setZ', wrap(async (value) => {
+  const v = Math.round(Number(value) * 100) / 100;
+  if (!bed.validZ(v)) throw new Error(`${value} doesn\u2019t look like a sensible Z-offset (it should be between ${bed.Z_MIN} and ${bed.Z_MAX}).`);
+  const before = await readZ();
+  await printer.query([`M851 Z${v.toFixed(2)}`, 'M500']);
+  const after = await readZ();
+  logStep(`Z-offset changed from ${before} to ${after} (asked for ${v})`);
+  if (after !== null && Math.abs(after - v) > 0.005) throw new Error(`The printer didn\u2019t accept the new Z-offset (it reports ${after}).`);
+  return { before, zOffset: after ?? v };
+}));
+
+ipcMain.handle('bed:readMesh', wrap(async () => {
+  const [lines] = await printer.query('M420 V');
+  const grid = bed.parseMesh(lines);
+  if (!grid) throw new Error('The printer didn\u2019t report a bed mesh. Try Measure again.');
+  return { grid, analysis: bed.analyze(grid, { knobs: settings.bedKnobs !== false, pitch: settings.knobPitch || 0.7 }) };
+}));
+
+ipcMain.handle('bed:analyze', (_e, grid) => bed.analyze(grid, { knobs: settings.bedKnobs !== false, pitch: settings.knobPitch || 0.7 }));
+
+// heat the bed, home, probe a new mesh. Takes a few minutes.
+ipcMain.handle('bed:measure', wrap(async (material) => {
+  const t = material === 'PETG' ? 70 : 60;
+  const step = (m) => send('bed:progress', m);
+  step(`Heating the bed to ${t}\u00b0\u2026`);
+  await printer.query(`M190 S${t}`, 15 * 60 * 1000);
+  step('Homing\u2026');
+  await printer.query('G28', 3 * 60 * 1000);
+  step('Measuring the bed (this takes a few minutes)\u2026');
+  await printer.query('G29', 15 * 60 * 1000);
+  const [lines] = await printer.query('M420 V');
+  await printer.query(['M420 S1', 'M140 S0']);
+  logStep('Measured a new bed mesh');
+  const grid = bed.parseMesh(lines);
+  if (!grid) throw new Error('The printer measured the bed but didn\u2019t report the result.');
+  return { grid, analysis: bed.analyze(grid, { knobs: settings.bedKnobs !== false, pitch: settings.knobPitch || 0.7 }) };
+}));
 
 ipcMain.handle('printer:connect', async () => {
   try { return { ok: true, status: await printer.connect() }; } catch (e) { return { ok: false, error: e.message }; }

@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld('easyprint', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   askStatus: () => ipcRenderer.invoke('ask:status'),
   ask: (input) => ipcRenderer.invoke('ask:run', input),
+  bed: {
+    info: () => ipcRenderer.invoke('bed:info'),
+    readZ: () => ipcRenderer.invoke('bed:readZ'),
+    setZ: (v) => ipcRenderer.invoke('bed:setZ', v),
+    readMesh: () => ipcRenderer.invoke('bed:readMesh'),
+    measure: (material) => ipcRenderer.invoke('bed:measure', material),
+    analyze: (grid) => ipcRenderer.invoke('bed:analyze', grid),
+    onProgress: (fn) => ipcRenderer.on('bed:progress', (_e, m) => fn(m)),
+  },
   printer: {
     connect: () => ipcRenderer.invoke('printer:connect'),
     disconnect: () => ipcRenderer.invoke('printer:disconnect'),
