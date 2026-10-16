@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('easyprint', {
     motorsOff: () => ipcRenderer.invoke('ctl:motorsOff'),
     home: () => ipcRenderer.invoke('ctl:home'),
     present: () => ipcRenderer.invoke('ctl:present'),
+    heat: (t) => ipcRenderer.invoke('ctl:heat', t),
+    extrude: (mm, speed) => ipcRenderer.invoke('ctl:extrude', { mm, speed }),
+    onHeatOff: (fn) => ipcRenderer.on('ctl:heatOff', (_e, at) => fn(at)),
   },
   printer: {
     connect: () => ipcRenderer.invoke('printer:connect'),

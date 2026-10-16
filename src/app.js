@@ -1037,7 +1037,24 @@ function ctlBusy(msg) {
   document.querySelectorAll('#ctlDialog button:not(#ctlClose), #psAfter button').forEach((b) => { b.disabled = !!msg; });
 }
 
+let heatOffAt = null;
+function updateHeat() {
+  const t = printerStatus.temps || {};
+  const target = t.nozzleTarget || 0, now = t.nozzle;
+  const st = $('heatStatus');
+  const hot = now != null && now >= 180;
+  document.querySelectorAll('#ctlDialog .ctl-btn.heat').forEach((b) => b.classList.toggle('on', target > 0 && Number(b.dataset.heat) === Math.round(target)));
+  document.querySelectorAll('#ctlDialog .ctl-btn.hot').forEach((b) => { b.disabled = !hot || isPrinting() || !$('ctlBusy').hidden; });
+  const left = heatOffAt ? Math.max(0, Math.ceil((heatOffAt - Date.now()) / 60000)) : null;
+  if (!printerStatus.connected) { st.className = 'heat-status'; st.textContent = ''; }
+  else if (target > 0 && now < target - 5) { st.className = 'heat-status'; st.textContent = `Heating\u2026 ${Math.round(now)}\u00b0 of ${Math.round(target)}\u00b0`; }
+  else if (target > 0) { st.className = 'heat-status ready'; st.textContent = `Hot and ready: ${Math.round(now)}\u00b0` + (left != null ? ` \u00b7 turns off in ${left} min` : ''); }
+  else if (hot) { st.className = 'heat-status'; st.textContent = `Cooling down: ${Math.round(now)}\u00b0`; }
+  else { st.className = 'heat-status'; st.textContent = now != null ? `Nozzle is cold (${Math.round(now)}\u00b0)` : ''; }
+}
+
 function updateCtl() {
+  updateHeat();
   const t = printerStatus.temps || {};
   $('ctlTemps').textContent = `${tempText(t.nozzle, t.nozzleTarget)} / ${tempText(t.bed, t.bedTarget)}`;
   const note = $('ctlNote');
@@ -1047,10 +1064,14 @@ function updateCtl() {
 }
 
 function showPos(pos) {
-  if (!pos) { $('ctlZ').textContent = 'unknown'; return; }
+  const hint = document.getElementById('ctlZHint');
+  if (!pos || pos.unknown) {
+    $('ctlZ').textContent = 'unknown';
+    if (hint) hint.textContent = 'the printer finds out after Home. Raising still works.';
+    return;
+  }
   $('ctlZ').textContent = pos.guessed ? `+${pos.z.toFixed(1)} mm` : `${pos.z.toFixed(1)} mm`;
   $('ctlZ').title = pos.guessed ? 'Measured from where the nozzle was. The printer will know the real height after Home.' : '';
-  const hint = document.getElementById('ctlZHint');
   if (hint) hint.textContent = pos.guessed ? 'above where it stopped (exact height after Home)' : 'above the bed';
 }
 
@@ -1070,7 +1091,7 @@ async function act(label, fn) {
 const raise = (d) => act(d > 0 ? `Raising ${d} mm\u2026` : `Lowering ${-d} mm\u2026`, () => ctl.moveZ(d)).then((r) => {
   return r;
 });
-const cool = () => act('Turning heaters off\u2026', () => ctl.cool()).then((r) => r && toast('Heaters off. The nozzle takes a few minutes to cool.', true));
+const cool = () => act('Turning heaters off\u2026', () => ctl.cool()).then((r) => { if (r) { heatOffAt = null; toast('Heaters off. The nozzle takes a few minutes to cool.', true); } return r; });
 const present = () => act('Moving the bed forward\u2026', () => ctl.present());
 
 if (ctl) {
@@ -1082,6 +1103,21 @@ if (ctl) {
   $('ctlClose').onclick = () => $('ctlDialog').close();
   document.querySelectorAll('#ctlDialog [data-z], #psAfter [data-z]').forEach((b) => { b.onclick = () => raise(Number(b.dataset.z)); });
   $('ctlCool').onclick = cool;
+  document.querySelectorAll('#ctlDialog [data-heat]').forEach((b) => {
+    b.onclick = () => act(`Heating to ${b.dataset.heat}\u00b0\u2026`, () => ctl.heat(Number(b.dataset.heat)));
+  });
+  document.querySelectorAll('#ctlDialog [data-e]').forEach((b) => {
+    const mm = Number(b.dataset.e);
+    const label = mm < 0 ? 'Pulling the filament out\u2026' : b.id === 'loadBtn' ? 'Feeding new filament\u2026' : 'Pushing plastic out\u2026';
+    b.onclick = async () => {
+      const r = await act(label, () => ctl.extrude(mm, Number(b.dataset.f)));
+      if (r && b.id === 'unloadBtn') toast('Done. Squeeze the extruder lever and pull the filament out the top.', true);
+      if (r && b.id === 'loadBtn') toast('If the new color is coming out of the nozzle, it\u2019s loaded. If not, press Push out a few times.', true);
+      updateHeat();
+    };
+  });
+  ctl.onHeatOff((at) => { heatOffAt = at; updateHeat(); });
+  setInterval(() => { if ($('ctlDialog').open) updateHeat(); }, 15000);
   $('ctlFan').onclick = async () => {
     const r = await act(fanOn ? 'Turning the fan off\u2026' : 'Turning the fan on\u2026', () => ctl.fan(!fanOn));
     if (r) { fanOn = !fanOn; $('ctlFan').textContent = fanOn ? 'Fan off' : 'Fan on (cool faster)'; }

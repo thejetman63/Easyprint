@@ -210,6 +210,20 @@
           <button class="ctl-wide subtle" id="ctlMotors">Motors off (move by hand)</button>
         </div>
       </div>
+      <section class="ctl-fil">
+        <div class="k">Heat the nozzle to free stuck plastic or change filament</div>
+        <div class="ctl-row">
+          <button class="ctl-btn heat" data-heat="210">Heat for PLA (210°)</button>
+          <button class="ctl-btn heat" data-heat="240">Heat for PETG (240°)</button>
+        </div>
+        <div class="heat-status" id="heatStatus"></div>
+        <div class="ctl-row">
+          <button class="ctl-btn hot" data-e="10" data-f="120">Push out 10 mm</button>
+          <button class="ctl-btn hot" data-e="-60" data-f="1200" id="unloadBtn">Unload filament</button>
+          <button class="ctl-btn hot" data-e="50" data-f="150" id="loadBtn">Load new filament</button>
+        </div>
+        <div class="ctl-tip">Nozzle stuck in a blob? Heat it, wait for the temperature, then press ▲ 10 mm. Clogged? Heat, then Push out until plastic flows. The nozzle turns off on its own after 10 minutes.</div>
+      </section>
       <div class="slice-status" id="ctlBusy" hidden><span class="spinner"></span><span id="ctlBusyText"></span></div>
     </div>
   </dialog>

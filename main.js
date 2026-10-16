@@ -204,7 +204,7 @@ ipcMain.handle('bed:measure', wrap(async (material) => {
   await printer.query(`M190 S${t}`, 15 * 60 * 1000);
   step('Homing\u2026');
   await printer.query('G28', 3 * 60 * 1000);
-  zGuessed = false;
+  zGuessed = false; posKnown = true;
   step('Measuring the bed (this takes a few minutes)\u2026');
   await printer.query('G29', 15 * 60 * 1000);
   const [lines] = await printer.query('M420 V');
@@ -218,18 +218,25 @@ ipcMain.handle('bed:measure', wrap(async (material) => {
 // ---------- manual controls (only when not printing) ----------
 const Z_TOP = 245; // Ender-3 V3 SE is 250 mm tall; stay just under
 let zGuessed = false; // true after a restart, until the printer is homed again
+let posKnown = false; // the printer only knows where it is after homing (or a print)
 const refused = (lines) => lines.some((l) => /home\s*(xyz|xy|z)?\s*first|not homed|unknown position|move out of range|homing failed/i.test(l));
 
 async function position() {
   const [lines] = await printer.query('M114');
   const m = lines.join(' ').match(/X:\s*(-?[\d.]+)\s*Y:\s*(-?[\d.]+)\s*Z:\s*(-?[\d.]+)/);
-  return m ? { x: +m[1], y: +m[2], z: +m[3], guessed: zGuessed } : null;
+  return m ? { x: +m[1], y: +m[2], z: +m[3], guessed: zGuessed, unknown: !posKnown && !zGuessed } : null;
 }
 
 async function moveZ(delta, { unlocked = false } = {}) {
   let d = Number(delta);
   if (!Number.isFinite(d) || d === 0 || Math.abs(d) > 100) throw new Error('That move isn\u2019t allowed.');
-  const pos = unlocked ? null : await position();
+  let pos = unlocked ? null : await position();
+  if (pos && pos.unknown) {
+    if (d < 0) throw new Error('The printer doesn\u2019t know how high the nozzle is yet. Press Home (with the bed clear) before lowering it.');
+    pos = null; // can't clamp against a height it doesn't know; the top limit is enforced after homing
+    if (d > 20) d = 20; // small steps until we know where the top is
+  }
+  const wasUnknown = !unlocked && !pos && !zGuessed;
   if (pos) {
     if (d > 0 && pos.z + d > Z_TOP) d = Z_TOP - pos.z;
     if (d < 0 && pos.z + d < 0.3) d = 0.3 - pos.z;
@@ -247,18 +254,64 @@ async function moveZ(delta, { unlocked = false } = {}) {
     zGuessed = true;
     return moveZ(delta, { unlocked: true });
   }
+  if (wasUnknown) zGuessed = true; // heights are now 'from where it was'
   logStep(`Moved nozzle ${d > 0 ? 'up' : 'down'} ${Math.abs(d).toFixed(1)} mm`);
   return { moved: +d.toFixed(2), position: await position() };
 }
 
 ipcMain.handle('ctl:position', wrap(async () => ({ position: await position() })));
 ipcMain.handle('ctl:moveZ', wrap((d) => moveZ(d)));
-ipcMain.handle('ctl:cool', wrap(async () => { await printer.query(['M104 S0', 'M140 S0']); logStep('Heaters off'); return {}; }));
+ipcMain.handle('ctl:cool', wrap(async () => { clearHeatTimer(); await printer.query(['M104 S0', 'M140 S0']); logStep('Heaters off'); return {}; }));
+
+// ---- heating the nozzle to clear or change filament ----
+const MIN_EXTRUDE = 180;    // below this the plastic isn't melted (printer refuses too)
+const AUTO_OFF_MIN = 10;    // don't leave a hot nozzle sitting there
+let heatTimer = null;
+function clearHeatTimer() { if (heatTimer) { clearTimeout(heatTimer); heatTimer = null; } send('ctl:heatOff', null); }
+function armHeatTimer() {
+  if (heatTimer) clearTimeout(heatTimer);
+  const at = Date.now() + AUTO_OFF_MIN * 60000;
+  send('ctl:heatOff', at);
+  heatTimer = setTimeout(async () => {
+    heatTimer = null;
+    send('ctl:heatOff', null);
+    const st = printer.status();
+    if (st.connected && !(st.job && !st.job.finished)) {
+      try { await printer.query('M104 S0'); logStep(`Nozzle turned off after ${AUTO_OFF_MIN} idle minutes`); } catch {}
+      send('printer:problem', `The nozzle was turned off after ${AUTO_OFF_MIN} minutes so it isn\u2019t left hot.`);
+    }
+  }, AUTO_OFF_MIN * 60000);
+}
+
+ipcMain.handle('ctl:heat', wrap(async (temp) => {
+  const t = Math.round(Number(temp));
+  if (!(t >= 0 && t <= 260)) throw new Error('That temperature isn\u2019t allowed.');
+  await printer.query(`M104 S${t}`);
+  if (t > 0) armHeatTimer(); else clearHeatTimer();
+  logStep(`Nozzle set to ${t}\u00b0`);
+  return { target: t };
+}));
+
+// mm > 0 pushes filament out of the nozzle, mm < 0 pulls it back up
+ipcMain.handle('ctl:extrude', wrap(async ({ mm, speed }) => {
+  const d = Number(mm);
+  if (!Number.isFinite(d) || d === 0 || Math.abs(d) > 120) throw new Error('That amount isn\u2019t allowed.');
+  const now = printer.status().temps.nozzle;
+  if (now == null || now < MIN_EXTRUDE) {
+    throw new Error(`The nozzle is only ${now == null ? '?' : Math.round(now)}\u00b0. Heat it first and wait until it\u2019s at least ${MIN_EXTRUDE}\u00b0.`);
+  }
+  const feed = Math.max(60, Math.min(1800, Number(speed) || 300)); // mm per minute
+  const replies = await printer.query(['M83', `G1 E${d.toFixed(1)} F${feed}`, 'M82', 'M400'], 120000);
+  if (replies.flat().some((l) => /cold extrusion/i.test(l))) throw new Error('The printer says the nozzle isn\u2019t hot enough yet. Wait a little longer.');
+  armHeatTimer(); // still working, so restart the auto-off countdown
+  logStep(`${d > 0 ? 'Pushed' : 'Pulled'} ${Math.abs(d)} mm of filament`);
+  return {};
+}));
 ipcMain.handle('ctl:fan', wrap(async (on) => { await printer.query(on ? 'M106 S255' : 'M107'); return {}; }));
 ipcMain.handle('ctl:motorsOff', wrap(async () => { await printer.query('M84'); return {}; }));
 ipcMain.handle('ctl:home', wrap(async () => {
   await printer.query(['G28', 'M400'], 3 * 60 * 1000);
-  zGuessed = false;
+  zGuessed = false; posKnown = true;
   logStep('Homed');
   return { position: await position() };
 }));
@@ -272,6 +325,7 @@ ipcMain.handle('ctl:present', wrap(async () => {
 }));
 
 ipcMain.handle('printer:connect', async () => {
+  if (!printer.status().connected) { posKnown = false; zGuessed = false; } // connecting restarts the board
   try { return { ok: true, status: await printer.connect() }; } catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('printer:disconnect', async () => {
@@ -279,7 +333,7 @@ ipcMain.handle('printer:disconnect', async () => {
 });
 ipcMain.handle('printer:status', () => printer.status());
 ipcMain.handle('printer:print', (_e, { gcodePath, estimateSeconds }) => {
-  try { printer.startPrint(gcodePath, { estimateSeconds }); zGuessed = false; return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
+  try { printer.startPrint(gcodePath, { estimateSeconds }); zGuessed = false; posKnown = true; return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('printer:pause', () => printer.pause());
 ipcMain.handle('printer:resume', () => printer.resume());
