@@ -27,6 +27,14 @@ for the printer and changes only a few settings for each choice. The recipes liv
 `lib/recipes.js`. If something goes wrong, the error box has **Show details** and
 **Open job folder**, which holds `orca-log.txt` to send to Claude.
 
+## Printer controls
+
+**↕ Controls** (top right), for when a print goes wrong: raise/lower the nozzle (50/10/1 mm),
+heaters off, fan on, bring the bed forward, home (asks first), motors off. Only works when nothing
+is printing. Raising never goes above 245 mm or below 0.3 mm. If the printer was just restarted and
+doesn't know its height, raising still works (measured from where it stopped); lowering and moving
+the bed need a Home first. After a print is stopped or fails, the print panel shows quick fixes.
+
 ## Bed setup
 
 **▦ Bed setup** (top right):

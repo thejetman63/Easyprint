@@ -204,6 +204,7 @@ ipcMain.handle('bed:measure', wrap(async (material) => {
   await printer.query(`M190 S${t}`, 15 * 60 * 1000);
   step('Homing\u2026');
   await printer.query('G28', 3 * 60 * 1000);
+  zGuessed = false;
   step('Measuring the bed (this takes a few minutes)\u2026');
   await printer.query('G29', 15 * 60 * 1000);
   const [lines] = await printer.query('M420 V');
@@ -214,6 +215,62 @@ ipcMain.handle('bed:measure', wrap(async (material) => {
   return { grid, analysis: bed.analyze(grid, { knobs: settings.bedKnobs !== false, pitch: settings.knobPitch || 0.7 }) };
 }));
 
+// ---------- manual controls (only when not printing) ----------
+const Z_TOP = 245; // Ender-3 V3 SE is 250 mm tall; stay just under
+let zGuessed = false; // true after a restart, until the printer is homed again
+const refused = (lines) => lines.some((l) => /home\s*(xyz|xy|z)?\s*first|not homed|unknown position|move out of range|homing failed/i.test(l));
+
+async function position() {
+  const [lines] = await printer.query('M114');
+  const m = lines.join(' ').match(/X:\s*(-?[\d.]+)\s*Y:\s*(-?[\d.]+)\s*Z:\s*(-?[\d.]+)/);
+  return m ? { x: +m[1], y: +m[2], z: +m[3], guessed: zGuessed } : null;
+}
+
+async function moveZ(delta, { unlocked = false } = {}) {
+  let d = Number(delta);
+  if (!Number.isFinite(d) || d === 0 || Math.abs(d) > 100) throw new Error('That move isn\u2019t allowed.');
+  const pos = unlocked ? null : await position();
+  if (pos) {
+    if (d > 0 && pos.z + d > Z_TOP) d = Z_TOP - pos.z;
+    if (d < 0 && pos.z + d < 0.3) d = 0.3 - pos.z;
+    if (d > 0 && d < 0.05) throw new Error('The nozzle is already at the top.');
+    if (d < 0 && d > -0.05) throw new Error('The nozzle is already at the bottom.');
+  }
+  const replies = await printer.query(['G91', `G1 Z${d.toFixed(2)} F600`, 'G90', 'M400'], 60000);
+  if (refused(replies.flat())) {
+    if (d < 0) throw new Error('The printer needs to be homed before the nozzle can go down. Clear the bed and press Home.');
+    if (unlocked) throw new Error('The printer won\u2019t move until it\u2019s homed. Let the nozzle cool, pull off any stuck plastic, then press Home.');
+    // After a restart the printer doesn't know where it is. Tell it "you're at 0"
+    // so it allows moving up (never down) from where it is now.
+    logStep('Printer not homed: treating the current height as 0 so the nozzle can be raised');
+    await printer.query('G92 Z0');
+    zGuessed = true;
+    return moveZ(delta, { unlocked: true });
+  }
+  logStep(`Moved nozzle ${d > 0 ? 'up' : 'down'} ${Math.abs(d).toFixed(1)} mm`);
+  return { moved: +d.toFixed(2), position: await position() };
+}
+
+ipcMain.handle('ctl:position', wrap(async () => ({ position: await position() })));
+ipcMain.handle('ctl:moveZ', wrap((d) => moveZ(d)));
+ipcMain.handle('ctl:cool', wrap(async () => { await printer.query(['M104 S0', 'M140 S0']); logStep('Heaters off'); return {}; }));
+ipcMain.handle('ctl:fan', wrap(async (on) => { await printer.query(on ? 'M106 S255' : 'M107'); return {}; }));
+ipcMain.handle('ctl:motorsOff', wrap(async () => { await printer.query('M84'); return {}; }));
+ipcMain.handle('ctl:home', wrap(async () => {
+  await printer.query(['G28', 'M400'], 3 * 60 * 1000);
+  zGuessed = false;
+  logStep('Homed');
+  return { position: await position() };
+}));
+// lift the nozzle, then bring the bed forward so the print is easy to reach
+ipcMain.handle('ctl:present', wrap(async () => {
+  const pos = await position();
+  if (pos && pos.z < 30) await moveZ(Math.min(30 - pos.z, 50));
+  const replies = await printer.query(['G90', 'G1 X5 Y215 F3000', 'M400'], 60000);
+  if (refused(replies.flat())) throw new Error('The printer needs to be homed before it can move the bed. Press Home when the bed is clear.');
+  return { position: await position() };
+}));
+
 ipcMain.handle('printer:connect', async () => {
   try { return { ok: true, status: await printer.connect() }; } catch (e) { return { ok: false, error: e.message }; }
 });
@@ -222,7 +279,7 @@ ipcMain.handle('printer:disconnect', async () => {
 });
 ipcMain.handle('printer:status', () => printer.status());
 ipcMain.handle('printer:print', (_e, { gcodePath, estimateSeconds }) => {
-  try { printer.startPrint(gcodePath, { estimateSeconds }); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
+  try { printer.startPrint(gcodePath, { estimateSeconds }); zGuessed = false; return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('printer:pause', () => printer.pause());
 ipcMain.handle('printer:resume', () => printer.resume());

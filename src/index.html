@@ -23,6 +23,7 @@
         <span id="printerText">Printer not connected</span>
         <button class="pill-btn" id="connectBtn">Connect</button>
       </div>
+      <button class="setup-btn" id="ctlBtn" title="Move the print head">↕ Controls</button>
       <button class="setup-btn" id="bedBtn" title="Bed setup">▦ Bed setup</button>
       <button class="setup-btn" id="setupBtn" title="Printer setup">⚙ Printer setup</button>
     </div>
@@ -166,8 +167,63 @@
       <button class="danger-btn" id="stopBtn">Stop</button>
       <button class="primary-btn small" id="closeSheetBtn" hidden>Done</button>
     </div>
+    <div class="ps-after" id="psAfter" hidden>
+      <span class="k">Quick fixes:</span>
+      <button class="mini-btn" data-z="10">Raise nozzle 10 mm</button>
+      <button class="mini-btn" data-z="50">Raise 50 mm</button>
+      <button class="mini-btn" data-act="present">Bring bed forward</button>
+      <button class="mini-btn" data-act="cool">Heaters off</button>
+    </div>
     <div class="ps-foot">Keep this computer on and the USB cable plugged in until it finishes.</div>
   </div>
+
+  <dialog class="modal" id="ctlDialog">
+    <div class="ctl-wrap">
+      <div class="bed-head">
+        <h2>Printer controls</h2>
+        <button class="x-btn" id="ctlClose" title="Close">✕</button>
+      </div>
+      <p class="muted">For when a print goes wrong: get the nozzle out of the mess. These work when nothing is printing.</p>
+      <div class="banner warn" id="ctlNote" hidden></div>
+      <div class="ctl-grid">
+        <div class="ctl-col">
+          <div class="k">Nozzle height</div>
+          <div class="z-big" id="ctlZ">–</div>
+          <div class="z-hint" id="ctlZHint"></div>
+          <div class="ctl-row">
+            <button class="ctl-btn up" data-z="50">▲▲ 50 mm</button>
+            <button class="ctl-btn up" data-z="10">▲ 10 mm</button>
+            <button class="ctl-btn up" data-z="1">▲ 1 mm</button>
+          </div>
+          <div class="ctl-row">
+            <button class="ctl-btn down" data-z="-1">▼ 1 mm</button>
+            <button class="ctl-btn down" data-z="-10">▼ 10 mm</button>
+          </div>
+        </div>
+        <div class="ctl-col">
+          <div class="k">Nozzle / bed</div>
+          <div class="ctl-temps" id="ctlTemps">–</div>
+          <button class="ctl-wide" id="ctlCool">Turn heaters off</button>
+          <button class="ctl-wide" id="ctlFan">Fan on (cool faster)</button>
+          <button class="ctl-wide" id="ctlPresent">Bring the bed forward</button>
+          <button class="ctl-wide" id="ctlHome">Home (bed must be clear)</button>
+          <button class="ctl-wide subtle" id="ctlMotors">Motors off (move by hand)</button>
+        </div>
+      </div>
+      <div class="slice-status" id="ctlBusy" hidden><span class="spinner"></span><span id="ctlBusyText"></span></div>
+    </div>
+  </dialog>
+
+  <dialog class="modal" id="homeConfirm">
+    <form method="dialog">
+      <h2>Is the bed clear?</h2>
+      <p class="muted">Homing touches the nozzle down on the bed. If plastic is stuck to the nozzle or bed, clear it first so nothing gets pushed into the bed.</p>
+      <div class="modal-actions">
+        <button value="no" class="secondary-btn inline">Not yet</button>
+        <button value="yes" class="primary-btn small">It’s clear, home</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog class="modal wide" id="bedDialog">
     <div class="bed-wrap">

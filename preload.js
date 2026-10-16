@@ -23,6 +23,15 @@ contextBridge.exposeInMainWorld('easyprint', {
     analyze: (grid) => ipcRenderer.invoke('bed:analyze', grid),
     onProgress: (fn) => ipcRenderer.on('bed:progress', (_e, m) => fn(m)),
   },
+  ctl: {
+    position: () => ipcRenderer.invoke('ctl:position'),
+    moveZ: (d) => ipcRenderer.invoke('ctl:moveZ', d),
+    cool: () => ipcRenderer.invoke('ctl:cool'),
+    fan: (on) => ipcRenderer.invoke('ctl:fan', on),
+    motorsOff: () => ipcRenderer.invoke('ctl:motorsOff'),
+    home: () => ipcRenderer.invoke('ctl:home'),
+    present: () => ipcRenderer.invoke('ctl:present'),
+  },
   printer: {
     connect: () => ipcRenderer.invoke('printer:connect'),
     disconnect: () => ipcRenderer.invoke('printer:disconnect'),

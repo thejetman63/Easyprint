@@ -780,6 +780,7 @@ function updateSheet() {
   $('psNote').textContent = j.paused ? 'The nozzle lifted out of the way. Press Resume to carry on.'
     : j.finished && !j.stopped && !j.failed ? doneNote : '';
 
+  $('psAfter').hidden = !(j.finished && (j.stopped || j.failed));
   $('pauseBtn').hidden = j.finished;
   $('stopBtn').hidden = j.finished;
   $('closeSheetBtn').hidden = !j.finished;
@@ -1025,6 +1026,76 @@ if (bedApi) {
   };
   $('infoCopy').onclick = () => { navigator.clipboard.writeText($('infoText').textContent); toast('Copied', true); };
   loadBedSettings();
+}
+
+// ---------- Printer controls ----------
+const ctl = api?.ctl;
+let fanOn = false;
+
+function ctlBusy(msg) {
+  $('ctlBusy').hidden = !msg; $('ctlBusyText').textContent = msg || '';
+  document.querySelectorAll('#ctlDialog button:not(#ctlClose), #psAfter button').forEach((b) => { b.disabled = !!msg; });
+}
+
+function updateCtl() {
+  const t = printerStatus.temps || {};
+  $('ctlTemps').textContent = `${tempText(t.nozzle, t.nozzleTarget)} / ${tempText(t.bed, t.bedTarget)}`;
+  const note = $('ctlNote');
+  if (isPrinting()) { note.hidden = false; note.textContent = 'A print is running. Use Pause or Stop on the print panel first.'; }
+  else if (!printerStatus.connected) { note.hidden = false; note.textContent = 'Not connected. Pressing a button connects first. Close Pronterface if it\u2019s open.'; }
+  else note.hidden = true;
+}
+
+function showPos(pos) {
+  if (!pos) { $('ctlZ').textContent = 'unknown'; return; }
+  $('ctlZ').textContent = pos.guessed ? `+${pos.z.toFixed(1)} mm` : `${pos.z.toFixed(1)} mm`;
+  $('ctlZ').title = pos.guessed ? 'Measured from where the nozzle was. The printer will know the real height after Home.' : '';
+  const hint = document.getElementById('ctlZHint');
+  if (hint) hint.textContent = pos.guessed ? 'above where it stopped (exact height after Home)' : 'above the bed';
+}
+
+// run one control action, connecting first if needed
+async function act(label, fn) {
+  if (isPrinting()) return toast('A print is running. Pause or stop it first.');
+  if (!(await ensureConnected())) return null;
+  ctlBusy(label);
+  const r = await fn();
+  ctlBusy(null);
+  updateCtl();
+  if (!r.ok) { toast(r.error); return null; }
+  if ('position' in r) showPos(r.position);
+  return r;
+}
+
+const raise = (d) => act(d > 0 ? `Raising ${d} mm\u2026` : `Lowering ${-d} mm\u2026`, () => ctl.moveZ(d)).then((r) => {
+  return r;
+});
+const cool = () => act('Turning heaters off\u2026', () => ctl.cool()).then((r) => r && toast('Heaters off. The nozzle takes a few minutes to cool.', true));
+const present = () => act('Moving the bed forward\u2026', () => ctl.present());
+
+if (ctl) {
+  $('ctlBtn').onclick = async () => {
+    updateCtl();
+    $('ctlDialog').showModal();
+    if (printerStatus.connected && !isPrinting()) { const r = await ctl.position(); if (r.ok) showPos(r.position); }
+  };
+  $('ctlClose').onclick = () => $('ctlDialog').close();
+  document.querySelectorAll('#ctlDialog [data-z], #psAfter [data-z]').forEach((b) => { b.onclick = () => raise(Number(b.dataset.z)); });
+  $('ctlCool').onclick = cool;
+  $('ctlFan').onclick = async () => {
+    const r = await act(fanOn ? 'Turning the fan off\u2026' : 'Turning the fan on\u2026', () => ctl.fan(!fanOn));
+    if (r) { fanOn = !fanOn; $('ctlFan').textContent = fanOn ? 'Fan off' : 'Fan on (cool faster)'; }
+  };
+  $('ctlPresent').onclick = present;
+  $('ctlMotors').onclick = () => act('Turning motors off\u2026', () => ctl.motorsOff()).then((r) => r && toast('Motors off. You can move the head and bed by hand.', true));
+  $('ctlHome').onclick = async () => {
+    const d = $('homeConfirm'); d.showModal();
+    const v = await new Promise((res) => d.addEventListener('close', () => res(d.returnValue), { once: true }));
+    if (v === 'yes') act('Homing\u2026', () => ctl.home());
+  };
+  document.querySelector('#psAfter [data-act="present"]').onclick = present;
+  document.querySelector('#psAfter [data-act="cool"]').onclick = cool;
+  pr?.onStatus(() => { if ($('ctlDialog').open) updateCtl(); });
 }
 
 // handy for testing
