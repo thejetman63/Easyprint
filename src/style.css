@@ -414,3 +414,4 @@ button:disabled { cursor: default; }
 .heat-status { font-size: 13.5px; font-weight: 600; margin: 2px 0 8px; min-height: 18px; }
 .heat-status.ready { color: var(--accent); }
 .ctl-tip { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.45; }
+.mesh-notes p.step-note { color: var(--ink); font-size: 13.5px; }

@@ -938,8 +938,11 @@ function showMesh(grid, analysis, before) {
   const v = $('meshVerdict'); v.className = `verdict ${analysis.level}`; v.textContent = analysis.verdict;
   $('meshRange').textContent = `Highest to lowest point: ${analysis.range.toFixed(2)} mm` + (analysis.tilt.length ? ` \u00b7 ${analysis.tilt.join(', ')}` : '');
   const ol = $('meshSteps'); ol.innerHTML = '';
-  for (const st of analysis.steps) { const li = document.createElement('li'); li.textContent = st.text; ol.appendChild(li); }
   const notes = $('meshNotes'); notes.innerHTML = '';
+  for (const st of analysis.steps) {
+    if (st.note) { const p = document.createElement('p'); p.className = 'step-note'; p.textContent = st.text; notes.appendChild(p); continue; }
+    const li = document.createElement('li'); li.textContent = st.text; ol.appendChild(li);
+  }
   for (const n of analysis.notes) { const p = document.createElement('p'); p.textContent = n; notes.appendChild(p); }
   if (bedSettings.bedKnobs === undefined && analysis.steps.length) {
     const p = document.createElement('p'); p.textContent = 'Answer the knob question above for turn-by-turn steps.'; notes.appendChild(p);
